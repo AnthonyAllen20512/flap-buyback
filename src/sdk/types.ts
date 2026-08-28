@@ -209,6 +209,7 @@ export interface ManifestExternalContract {
 export type VaultManifestLayout = "fullscreen";
 export type VaultManifestMode = "mini-app";
 export type VaultManifestCapability = "three-r3f-v1";
+export type VaultArtifactSurface = "vault-ui" | "launch-config";
 export interface VaultManifestDisplayTitle {
   zh: string;
   en: string;
@@ -223,9 +224,57 @@ export interface VaultManifest {
   };
   mode?: VaultManifestMode;
   capabilities?: VaultManifestCapability[];
+  /** Omitted manifests keep the legacy vault-ui-only behavior. */
+  surfaces?: VaultArtifactSurface[];
   layout?: VaultManifestLayout;
   endpoints?: EndpointPolicy;
   i18n: string[];
+}
+
+export interface VaultLaunchSchemaField {
+  name: string;
+  fieldType: string;
+  description?: string;
+}
+
+export interface VaultLaunchSchema {
+  fields: VaultLaunchSchemaField[];
+  isArray: boolean;
+  description?: string;
+}
+
+export type VaultLaunchConfigValues = Record<string, unknown> | Record<string, unknown>[];
+
+export interface VaultLaunchConfigSummaryItem {
+  label: string;
+  value: string;
+}
+
+export type VaultLaunchConfigResult =
+  | {
+      status: "invalid";
+      errors?: string[];
+    }
+  | {
+      status: "valid";
+      /** Structured values are encoded and validated by the Flap host. */
+      values: VaultLaunchConfigValues;
+      summary?: VaultLaunchConfigSummaryItem[];
+    };
+
+export interface VaultLaunchConfigContext {
+  chainId: number;
+  factoryAddress: Address;
+  locale: string;
+  tokenName?: string;
+  tokenSymbol?: string;
+  schema: VaultLaunchSchema;
+}
+
+export interface VaultLaunchConfigComponentProps {
+  context: VaultLaunchConfigContext;
+  messages: Record<string, string>;
+  onChange: (result: VaultLaunchConfigResult) => void;
 }
 
 export type EndpointPolicy = string | string[];

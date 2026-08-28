@@ -121,11 +121,14 @@ Then edit only:
 
 ```plain text
 src/vaults/{folder-name}/Component.tsx
+src/vaults/{folder-name}/LaunchConfig.tsx  # optional; only for manifest.surfaces launch-config
 src/vaults/{folder-name}/manifest.json
 src/vaults/{folder-name}/VaultABI.ts
 src/vaults/{folder-name}/i18n.json
 src/vaults/{folder-name}/<optional-mini-app-audio>.mp3
 ```
+
+For a factory-scoped launch configuration surface, follow `docs/launch-config.md`. `LaunchConfig.tsx` may only collect structured schema values through `onChange`; it must not ABI-encode, simulate, write, or render the final host confirmation. `Component.tsx` must re-export it as the named `LaunchConfig` export, and `manifest.surfaces` must include `launch-config`.
 
 If the Vault files were generated directly from a provided manifest instead of using `vault:scaffold`, run:
 

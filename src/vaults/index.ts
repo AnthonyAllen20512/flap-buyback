@@ -3,7 +3,10 @@ import type { VaultComponentProps, VaultManifest } from "@/src/sdk";
 
 export interface VaultModule {
   folderName: string;
-  loadComponent: () => Promise<{ default: ComponentType<VaultComponentProps> }>;
+  loadComponent: () => Promise<{
+    default: ComponentType<VaultComponentProps>;
+    LaunchConfig?: ComponentType<import("@/src/sdk").VaultLaunchConfigComponentProps>;
+  }>;
   loadManifest: () => Promise<{ default: VaultManifest }>;
   loadI18n: () => Promise<{ default: Record<string, Record<string, string>> }>;
 }

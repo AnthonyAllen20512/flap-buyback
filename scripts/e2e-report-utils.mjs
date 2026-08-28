@@ -97,6 +97,12 @@ export function collectMiniAppAudioAssetPaths(root, folderName) {
   }
 }
 
+export function collectSurfaceSourcePaths(root, folderName) {
+  const manifest = readManifest(root, folderName);
+  const surfaces = Array.isArray(manifest?.surfaces) ? manifest.surfaces : [];
+  return surfaces.includes("launch-config") ? [`src/vaults/${folderName}/LaunchConfig.tsx`] : [];
+}
+
 function walkFiles(dir, files = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
@@ -118,7 +124,14 @@ export function collectCapabilitySourcePaths(root, folderName) {
 }
 
 export function sourcePackagePaths(root, folderName) {
-  return [...new Set([...requiredSourcePaths(folderName), ...collectMiniAppAudioAssetPaths(root, folderName), ...collectCapabilitySourcePaths(root, folderName)])].sort();
+  return [
+    ...new Set([
+      ...requiredSourcePaths(folderName),
+      ...collectSurfaceSourcePaths(root, folderName),
+      ...collectMiniAppAudioAssetPaths(root, folderName),
+      ...collectCapabilitySourcePaths(root, folderName),
+    ]),
+  ].sort();
 }
 
 export function collectSourceHashes(root, folderName) {
@@ -287,6 +300,16 @@ export function validateE2EReportObject(report, { root, folderName, manifest, ex
       addIssue("e2e-report/preview-source-unverified", "E2E report must prove that the preview server served the uploaded Component.tsx source.", {
         expected: expectedHashes[componentPath],
         actual: report.previewSource?.componentSha256,
+      });
+    }
+    const launchConfigPath = `src/vaults/${folderName}/LaunchConfig.tsx`;
+    if (
+      expectedHashes[launchConfigPath] &&
+      (report.previewSource?.verified !== true || report.previewSource?.launchConfigSha256 !== expectedHashes[launchConfigPath])
+    ) {
+      addIssue("e2e-report/preview-launch-config-source-unverified", "E2E report must prove that the preview server served the uploaded LaunchConfig.tsx source.", {
+        expected: expectedHashes[launchConfigPath],
+        actual: report.previewSource?.launchConfigSha256,
       });
     }
   }

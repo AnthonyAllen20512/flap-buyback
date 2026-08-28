@@ -37,14 +37,17 @@ const FOLDER_NAME_MAX_LENGTH = 64;
 const ARTIFACT_ID_RE = /^vaultui_([a-z0-9]+(?:-[a-z0-9]+)*)_([0-9A-HJKMNPQRSTVWXYZ]{26})$/;
 const FORBIDDEN_NAMES = new Set(["node_modules", ".git", ".vercel", ".env", ".env.local", "package-lock.json", "pnpm-lock.yaml"]);
 const REQUIRED_FILES = ["Component.tsx", "manifest.json", "VaultABI.ts", "i18n.json"];
-const ALLOWED_VAULT_FILES = new Set(REQUIRED_FILES);
-const ALLOWED_RELATIVE_IMPORTS = new Set(["./VaultABI"]);
-const ALLOWED_MANIFEST_KEYS = new Set(["artifactId", "name", "displayTitle", "match", "i18n", "mode", "layout", "endpoints", "externalFrames", "capabilities"]);
+const OPTIONAL_SURFACE_FILES = ["LaunchConfig.tsx"];
+const ALLOWED_VAULT_FILES = new Set([...REQUIRED_FILES, ...OPTIONAL_SURFACE_FILES]);
+const ALLOWED_RELATIVE_IMPORTS = new Set(["./VaultABI", "./LaunchConfig"]);
+const ALLOWED_MANIFEST_KEYS = new Set(["artifactId", "name", "displayTitle", "match", "i18n", "mode", "layout", "endpoints", "externalFrames", "capabilities", "surfaces"]);
 const ALLOWED_MATCH_KEYS = new Set(["bindings"]);
 const ALLOWED_BINDING_ENTRY_KEYS = new Set(["chainId", "factoryAddress", "vaultAddresses", "tokenAddresses", "externalContracts"]);
 const FULLSCREEN_LAYOUT = "fullscreen";
 const MINI_APP_MODE = "mini-app";
 const MINI_APP_TOKEN_SUFFIXES = ["7777", "8888"];
+const ARTIFACT_SURFACES = new Set(["vault-ui", "launch-config"]);
+const LAUNCH_CONFIG_SURFACE = "launch-config";
 const VAULT_UI_3D_TOKEN_SUFFIX = "7777";
 const CJK_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u;
 const LATIN_RE = /[A-Za-z]/u;
@@ -3152,7 +3155,7 @@ function checkStructure(vaultDir) {
         }
         continue;
       }
-      issues.push(issue(BLOCKING, "package-structure/disallowed-vault-file", `Vault folder may contain only ${REQUIRED_FILES.join(", ")}${isMiniApp ? " plus reviewed top-level audio assets" : ""}. Move ${item.name} outside src/vaults/${path.basename(vaultDir)}.`, { file: rel }));
+      issues.push(issue(BLOCKING, "package-structure/disallowed-vault-file", `Vault folder may contain only ${[...REQUIRED_FILES, ...OPTIONAL_SURFACE_FILES].join(", ")}${isMiniApp ? " plus reviewed top-level audio assets" : ""}. Move ${item.name} outside src/vaults/${path.basename(vaultDir)}.`, { file: rel }));
       continue;
     }
     if (!item.isDirectory && item.name.match(/\.(png|jpe?g|gif|webp|svg)$/i)) {
@@ -3560,6 +3563,44 @@ function checkManifest(manifest, folderName) {
           dependencies: threeR3FProfile(ROOT).dependencies,
         }));
       }
+    }
+  }
+  const surfaces = manifest.surfaces === undefined ? ["vault-ui"] : manifest.surfaces;
+  if (
+    !Array.isArray(surfaces) ||
+    surfaces.length === 0 ||
+    surfaces.some((surface) => typeof surface !== "string" || !ARTIFACT_SURFACES.has(surface))
+  ) {
+    issues.push(
+      issue(
+        BLOCKING,
+        "manifest-schema/invalid-surfaces",
+        'manifest.surfaces must be a non-empty unique array containing only "vault-ui" and "launch-config".',
+        { field: "surfaces" },
+      ),
+    );
+  } else {
+    if (new Set(surfaces).size !== surfaces.length) {
+      issues.push(issue(BLOCKING, "manifest-schema/duplicate-surface", "manifest.surfaces must not contain duplicates.", { field: "surfaces" }));
+    }
+    if (isMiniAppMode && manifest.surfaces !== undefined) {
+      issues.push(issue(BLOCKING, "manifest-schema/mini-app-surfaces", "Mini App artifacts do not use Vault launch-config surfaces. Remove manifest.surfaces.", { field: "surfaces" }));
+    }
+    if (surfaces.includes(LAUNCH_CONFIG_SURFACE)) {
+      const launchConfigPath = path.join(ROOT, "src", "vaults", folderName, "LaunchConfig.tsx");
+      const componentPath = path.join(ROOT, "src", "vaults", folderName, "Component.tsx");
+      if (!fs.existsSync(launchConfigPath)) {
+        issues.push(issue(BLOCKING, "launch-config/missing-component", "launch-config surface requires LaunchConfig.tsx.", { file: `src/vaults/${folderName}/LaunchConfig.tsx` }));
+      }
+      if (fs.existsSync(componentPath) && !/export\s*\{[^}]*\bLaunchConfig\b[^}]*\}\s*from\s*["'`]\.\/LaunchConfig["'`]/s.test(fs.readFileSync(componentPath, "utf8"))) {
+        issues.push(issue(BLOCKING, "launch-config/missing-export", 'Component.tsx must export the named LaunchConfig component from "./LaunchConfig".', { file: `src/vaults/${folderName}/Component.tsx` }));
+      }
+      const hasFactoryBinding = Array.isArray(manifest.match?.bindings) && manifest.match.bindings.some((binding) => ADDRESS_RE.test(binding?.factoryAddress ?? "") && binding.factoryAddress !== ZERO_ADDRESS);
+      if (!hasFactoryBinding) {
+        issues.push(issue(BLOCKING, "launch-config/missing-factory-binding", "launch-config requires at least one factory-scoped match.bindings entry.", { field: "match.bindings" }));
+      }
+    } else if (fs.existsSync(path.join(ROOT, "src", "vaults", folderName, "LaunchConfig.tsx"))) {
+      issues.push(issue(BLOCKING, "launch-config/undeclared-component", 'LaunchConfig.tsx exists but manifest.surfaces does not include "launch-config".', { file: `src/vaults/${folderName}/LaunchConfig.tsx` }));
     }
   }
   if (manifest.layout !== undefined) {
@@ -4194,7 +4235,7 @@ function checkCode(vaultDir, manifest, i18n, manifestLocales) {
     issues.push(...collectBrowserGlobalMemberIssues(scanContent, rel, manifest));
     issues.push(...collectWindowOpenIssues(scanContent, rel));
     issues.push(...collectAstSecurityIssues(content, rel, { declaredFrames, contractPolicy, externalLinkUrlSourceRanges: approvedResourceRanges }));
-    if (item.name === "Component.tsx") {
+    if (item.name === "Component.tsx" || item.name === "LaunchConfig.tsx") {
       issues.push(...collectHardcodedVisibleCopyIssues(content, rel));
       issues.push(...collectInlineSvgIssues(content, rel));
     }
@@ -4206,7 +4247,7 @@ function checkCode(vaultDir, manifest, i18n, manifestLocales) {
         const isMiniAppAudioImport = manifest?.mode === MINI_APP_MODE && isMiniAppAudioImportSpec(spec) && fs.existsSync(path.join(importerDir, spec));
         const isCapabilityRelativeImport = isThreeR3FArtifact(manifest) && Boolean(resolveCapabilityRelativeImport(vaultDir, item.path, spec, capabilityFileExtensions(manifest, ROOT)));
         if (!isMiniAppAudioImport && !isCapabilityRelativeImport && !ALLOWED_RELATIVE_IMPORTS.has(normalizeRelativeImport(spec))) {
-          issues.push(issue(BLOCKING, "imports-and-dependencies/disallowed-relative-import", `Only ./VaultABI may be imported from a default Vault package. Mini App mode may also import top-level reviewed audio assets. ${spec} is not allowed.`, { file: rel }));
+          issues.push(issue(BLOCKING, "imports-and-dependencies/disallowed-relative-import", `Only ./VaultABI and the declared ./LaunchConfig surface may be imported from a default Vault package. Mini App mode may also import top-level reviewed audio assets. ${spec} is not allowed.`, { file: rel }));
         }
       } else if (FORBIDDEN_IMPORTS.some((blocked) => spec === blocked || spec.startsWith(`${blocked}/`))) {
         issues.push(issue(BLOCKING, "imports-and-dependencies/forbidden-import", `Forbidden import ${spec}. Use Flap SDK/UI primitives instead.`, { file: rel }));
@@ -4446,6 +4487,16 @@ function checkCode(vaultDir, manifest, i18n, manifestLocales) {
       );
     }
     const hasUserWritePath = /\b(?:writeContract|simulateContract)\s*\(|<TxButton\b/.test(scanContent);
+    if (item.name === "LaunchConfig.tsx" && hasUserWritePath) {
+      issues.push(
+        issue(
+          BLOCKING,
+          "launch-config/write-capability",
+          "LaunchConfig.tsx must not simulate or send transactions. It may only collect structured values through onChange; the Flap host owns confirmation and launch writes.",
+          { file: rel },
+        ),
+      );
+    }
     const hasMarketPhaseHandling = /\b(?:marketPhase|isActionAvailableForPhase)\b/.test(scanContent);
     if (item.name === "Component.tsx" && hasUserWritePath && !hasMarketPhaseHandling) {
       issues.push(
@@ -4666,7 +4717,7 @@ function buildCheckReport(folderName, issues) {
     agent: {
       verdict: blocking > 0 ? "fix-blocking" : warning > 0 ? "review-warnings" : "package-ready",
       nextActions: buildAgentNextActions(issues),
-      allowedVaultFiles: REQUIRED_FILES,
+      allowedVaultFiles: [...REQUIRED_FILES, ...OPTIONAL_SURFACE_FILES],
       capabilityProfiles: loadMiniAppCapabilityConfig(ROOT).profiles,
       allowedMiniAppAudioExtensions: MINI_APP_AUDIO_ASSET_EXTENSIONS,
       allowedLocalRelativeImports: [...ALLOWED_RELATIVE_IMPORTS],

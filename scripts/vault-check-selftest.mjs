@@ -85,6 +85,24 @@ export default function SelftestVault(_props: VaultComponentProps) {
   fs.writeFileSync(path.join(vaultDir, "i18n.json"), `${JSON.stringify(i18n || { en: { title: "Selftest" } }, null, 2)}\n`);
 }
 
+function writeLaunchConfig(folderName, content) {
+  fs.writeFileSync(
+    path.join(ROOT, "src", "vaults", folderName, "LaunchConfig.tsx"),
+    content || `"use client";
+
+import type { VaultLaunchConfigComponentProps } from "@/src/sdk";
+
+export default function LaunchConfig({ messages, onChange }: VaultLaunchConfigComponentProps) {
+  return (
+    <button type="button" onClick={() => onChange({ status: "valid", values: {} })}>
+      {messages["launch.ready"]}
+    </button>
+  );
+}
+`,
+  );
+}
+
 function componentWithRiskBody(body) {
   return `"use client";
 
@@ -305,6 +323,82 @@ try {
     manifest: baseManifest({ mode: "vault-ui" }),
   });
   assertRule("manifest mode values other than mini-app are blocked", runVaultCheck(invalidModeSlug, { silent: true }), "manifest-schema/invalid-mode", "blocking");
+
+  const launchConfigMissingComponentSlug = `${FIXTURE_PREFIX}-launch-config-missing`;
+  writeVault(launchConfigMissingComponentSlug, {
+    manifest: baseManifest({ surfaces: ["vault-ui", "launch-config"] }),
+  });
+  assertRule(
+    "launch-config surface requires LaunchConfig.tsx",
+    runVaultCheck(launchConfigMissingComponentSlug, { silent: true }),
+    "launch-config/missing-component",
+    "blocking",
+  );
+
+  const launchConfigMissingExportSlug = `${FIXTURE_PREFIX}-launch-config-export`;
+  writeVault(launchConfigMissingExportSlug, {
+    manifest: baseManifest({ surfaces: ["vault-ui", "launch-config"] }),
+  });
+  writeLaunchConfig(launchConfigMissingExportSlug);
+  assertRule(
+    "launch-config surface requires the named bundle export",
+    runVaultCheck(launchConfigMissingExportSlug, { silent: true }),
+    "launch-config/missing-export",
+    "blocking",
+  );
+
+  const launchConfigWriteSlug = `${FIXTURE_PREFIX}-launch-config-write`;
+  writeVault(launchConfigWriteSlug, {
+    component: `${componentWithRiskBody(`  return (
+    <div>
+      <StatusBadge>{riskLabel}</StatusBadge>
+      {riskLevel === null ? <Alert>{i18n.t("risk.missing")}</Alert> : null}
+    </div>
+  );`)}
+export { default as LaunchConfig } from "./LaunchConfig";
+`,
+    manifest: baseManifest({ surfaces: ["vault-ui", "launch-config"] }),
+    i18n: { en: { "risk.missing": "Risk status missing", "launch.ready": "Ready" } },
+  });
+  writeLaunchConfig(
+    launchConfigWriteSlug,
+    `"use client";
+import type { VaultLaunchConfigComponentProps } from "@/src/sdk";
+import { TxButton } from "@/src/ui";
+export default function LaunchConfig(_props: VaultLaunchConfigComponentProps) {
+  return <TxButton state="idle" onClick={() => undefined}>Unsafe</TxButton>;
+}
+`,
+  );
+  assertRule(
+    "launch-config components cannot send or simulate transactions",
+    runVaultCheck(launchConfigWriteSlug, { silent: true }),
+    "launch-config/write-capability",
+    "blocking",
+  );
+
+  const launchConfigValidSlug = `${FIXTURE_PREFIX}-launch-config-valid`;
+  writeVault(launchConfigValidSlug, {
+    component: `${componentWithRiskBody(`  return (
+    <div>
+      <StatusBadge>{riskLabel}</StatusBadge>
+      {riskLevel === null ? <Alert>{i18n.t("risk.missing")}</Alert> : null}
+    </div>
+  );`)}
+export { default as LaunchConfig } from "./LaunchConfig";
+`,
+    manifest: baseManifest({ surfaces: ["vault-ui", "launch-config"] }),
+    i18n: { en: { "risk.missing": "Risk status missing", "launch.ready": "Ready" } },
+  });
+  writeLaunchConfig(launchConfigValidSlug);
+  const launchConfigValidResult = runVaultCheck(launchConfigValidSlug, { silent: true });
+  assert.equal(
+    launchConfigValidResult.issues.filter(
+      (item) => item.severity === "blocking" && item.ruleId !== "preview-registration/missing-vault-module",
+    ).length,
+    0,
+  );
+  passed.push("declared launch-config components pass the controlled component boundary");
 
   const invalidMiniAppBindingSlug = `${FIXTURE_PREFIX}-invalid-mini-app-binding`;
   writeVault(invalidMiniAppBindingSlug, {

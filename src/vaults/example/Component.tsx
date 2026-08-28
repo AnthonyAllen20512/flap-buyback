@@ -7,6 +7,8 @@ import { erc20Abi, formatTokenAmount, handleTxError, isActionAvailableForPhase, 
 import { exampleVaultAbi } from "./VaultABI";
 import { AddressLink, Alert, Button, Card, CardContent, CardHeader, CardTitle, Countdown, DetailTile, Input, Metric, StatusBadge, TxButton, type TxButtonState } from "@/src/ui";
 
+export { default as LaunchConfig } from "./LaunchConfig";
+
 interface VaultInfo {
   totalDeposited: bigint;
   rewardEndsAt: number;

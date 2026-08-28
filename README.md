@@ -16,6 +16,8 @@
 
 This repository is a public starter for building private custom Flap Vault UI components.
 
+Factory-scoped artifacts may also provide a reviewed launch-time configuration surface. Add `LaunchConfig.tsx`, declare `"surfaces": ["vault-ui", "launch-config"]`, and export it as the named `LaunchConfig` export from `Component.tsx`. The host keeps schema validation, ABI encoding, final confirmation, and the launch transaction. See [docs/launch-config.md](./docs/launch-config.md).
+
 The template supports Vault V2-standard NFT image display.
 
 Standard 3D uses the versioned `three-r3f-v1` profile on a mode-less 7777 Vault UI, a token-scoped 7777 Tax Token Mini App, or a token-scoped 8888 zero-tax Mini App. Mode-less 7777 keeps factory/Vault/token bindings and host risk status; Mini App uses token-only same-suffix bindings, bilingual displayTitle, and full-height layout. See `docs/mini-app-3d.md` for the complete contract.
@@ -61,7 +63,7 @@ yarn vault:scaffold my-vault --name "My Vault UI" --chain 56 --vault 0xVaultAddr
 
 Replace placeholder addresses with real deployment addresses before running these commands.
 
-4. For a default Vault UI, edit only the four package files under `src/vaults/my-vault`. A mode-less 7777 Vault UI or token-scoped 7777/8888 Mini App declaring `three-r3f-v1` may add only recursively statically reachable files allowed by that profile.
+4. For a default Vault UI, edit only the four package files under `src/vaults/my-vault`: `Component.tsx`, `manifest.json`, `VaultABI.ts`, and `i18n.json`. A factory-scoped artifact declaring the `launch-config` surface may additionally include `LaunchConfig.tsx`. A mode-less 7777 Vault UI or token-scoped 7777/8888 Mini App declaring `three-r3f-v1` may instead add only recursively statically reachable files allowed by that capability profile.
    Keep the scaffolded default business card structure unless the Vault needs a different pattern. When no UI style is specified, use the scaffold default / NiePan-style abstract template; built-in examples are behavior references, not the default visual style.
    For icons, use `lucide-react` first and choose icons from the official Lucide icon library: `https://lucide.dev/icons/`.
 5. Preview the route and test the actual workflow:
@@ -317,6 +319,7 @@ Manual package shape:
 ```plain text
 src/vaults/{folder-name}/
   Component.tsx
+  LaunchConfig.tsx  # optional launch-config surface
   manifest.json
   VaultABI.ts
   i18n.json
@@ -340,7 +343,8 @@ Versioning rules for the Agent contract, manifest schema, and source package for
 The Vault folder is a strict source package boundary. It may contain only:
 
 - `Component.tsx`: the controlled React Vault UI component.
-- `manifest.json`: required `artifactId`, `match.bindings`, and `i18n`; optional `mode: "mini-app"` only for token-scoped bindings that are all 7777 or all 8888; optional `layout: "fullscreen"`, endpoints, and reviewed frames. Omit `mode` for default Vault UI. Mini App must not use factory/Vault bindings or mix 7777 and 8888. Production CA restriction is Workbench/registry `caRestrictionMode`, not a public manifest field.
+- `LaunchConfig.tsx`: optional factory-scoped launch form declared by `manifest.surfaces`; it returns structured values and cannot send transactions.
+- `manifest.json`: required `artifactId`, `match.bindings`, and `i18n`; optional `mode: "mini-app"` only for token-scoped bindings that are all 7777 or all 8888; optional `layout: "fullscreen"`, endpoints, reviewed frames, and `surfaces`. Omit `mode` for default Vault UI. Mini App must not use factory/Vault bindings or mix 7777 and 8888. Production CA restriction is Workbench/registry `caRestrictionMode`, not a public manifest field.
 - `VaultABI.ts`: minimal Vault ABI fragments only. Standard ERC20 ABI is exported from `@/src/sdk`; add token ABI fragments here only for custom non-standard token methods.
 - `i18n.json`: locale dictionaries declared by `manifest.i18n`; manifest locale strings must be at least two characters.
 
@@ -425,7 +429,7 @@ Contract interaction should stay on `context.vaultAddress`, `context.tokenAddres
 
 For dynamic Vault modules such as staking pools, auction contracts, routers, dividend distributors, wrappers, and trigger helpers, do not read the module address from the Vault and call that returned contract directly. Expose UI-facing views and public proxy actions on the Vault, keep only the Vault-facing methods in `VaultABI.ts`, and call them through `context.vaultAddress`. Use `match.bindings[].externalContracts` only for a truly fixed independent contract that cannot be represented by the runtime Vault/token/factory boundary; declaration is review-only and is not a way to bypass the dynamic-module rule. See [Dynamic modules: staking, auctions, routers, and helpers](./docs/ai-agent.md#dynamic-modules-staking-auctions-routers-and-helpers).
 
-The local relative import surface is fixed: default Vault UI `Component.tsx` may import `./VaultABI` only. Mini App mode may also statically import reviewed top-level audio files such as `./bgm.mp3`. Do not import `./helpers`, `../VaultABI`, nested components, non-audio local assets, or any other local file. Use public aliases such as `@/src/sdk` and `@/src/ui` for shared runtime surfaces.
+The local relative import surface is fixed: default Vault UI `Component.tsx` may import `./VaultABI` and, only when declared by `manifest.surfaces`, `./LaunchConfig`. Mini App mode may also statically import reviewed top-level audio files such as `./bgm.mp3`. Do not import `./helpers`, `../VaultABI`, nested components, non-audio local assets, or any other local file. Use public aliases such as `@/src/sdk` and `@/src/ui` for shared runtime surfaces.
 
 For the build/runtime boundary, see [docs/runtime-module-contract.md](./docs/runtime-module-contract.md). The intended model is one shared runtime surface for `@/src/sdk` and `@/src/ui` across local preview, Artifact Workbench, and `flap.sh`, rather than separately bundling unrelated SDK/provider copies into every Vault artifact.
 

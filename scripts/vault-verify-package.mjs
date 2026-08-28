@@ -182,6 +182,9 @@ function readJsonEntry(entries, entryName) {
 function expectedSourceFiles(folderName, names, manifest) {
   const required = REQUIRED_SOURCE_FILES.map((file) => `src/vaults/${folderName}/${file}`);
   const prefix = `src/vaults/${folderName}/`;
+  const surfaceFiles = Array.isArray(manifest?.surfaces) && manifest.surfaces.includes("launch-config")
+    ? [`${prefix}LaunchConfig.tsx`]
+    : [];
   const capabilityExtensions = capabilityFileExtensions(manifest, process.cwd());
   const hasCapabilities = isThreeR3FArtifact(manifest) && manifestCapabilityIds(manifest).length > 0;
   const audioFiles = manifest?.mode === MINI_APP_MODE
@@ -196,7 +199,7 @@ function expectedSourceFiles(folderName, names, manifest) {
   const capabilityFiles = hasCapabilities
     ? names.filter((name) => name.startsWith(prefix) && capabilityExtensions.has(path.extname(name).toLowerCase()))
     : [];
-  return [...new Set([...required, ...audioFiles, ...capabilityFiles])].sort();
+  return [...new Set([...required, ...surfaceFiles, ...audioFiles, ...capabilityFiles])].sort();
 }
 
 function readCurrentPackageVersion() {

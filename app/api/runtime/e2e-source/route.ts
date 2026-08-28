@@ -21,5 +21,12 @@ export async function GET(request: NextRequest) {
   if (!fs.existsSync(componentPath)) {
     return NextResponse.json({ error: "Vault component not found." }, { status: 404 });
   }
-  return NextResponse.json({ folderName, componentSha256: normalizedSourceSha256(componentPath) });
+  const launchConfigPath = path.join(process.cwd(), "src", "vaults", folderName, "LaunchConfig.tsx");
+  return NextResponse.json({
+    folderName,
+    componentSha256: normalizedSourceSha256(componentPath),
+    ...(fs.existsSync(launchConfigPath)
+      ? { launchConfigSha256: normalizedSourceSha256(launchConfigPath) }
+      : {}),
+  });
 }

@@ -232,7 +232,7 @@ async function startPreviewServer() {
   }
 }
 
-async function verifyPreviewSource(baseUrl, expectedComponentSha256) {
+async function verifyPreviewSource(baseUrl, expectedComponentSha256, expectedLaunchConfigSha256) {
   const endpoint = new URL("/api/runtime/e2e-source", baseUrl);
   endpoint.searchParams.set("folderName", folderName);
   let response;
@@ -263,14 +263,23 @@ async function verifyPreviewSource(baseUrl, expectedComponentSha256) {
       { expected: expectedComponentSha256, actual: payload?.componentSha256, endpoint: endpoint.toString() },
     );
   }
+  if (expectedLaunchConfigSha256 && payload?.launchConfigSha256 !== expectedLaunchConfigSha256) {
+    failE2E(
+      "vault-e2e/preview-launch-config-source-mismatch",
+      "The preview server LaunchConfig.tsx hash does not match the source being tested.",
+      "Stop stale preview servers and rerun yarn vault:e2e <folder-name> from the current checkout.",
+      { expected: expectedLaunchConfigSha256, actual: payload?.launchConfigSha256, endpoint: endpoint.toString() },
+    );
+  }
   return {
     verified: true,
     componentSha256: payload.componentSha256,
+    ...(payload.launchConfigSha256 ? { launchConfigSha256: payload.launchConfigSha256 } : {}),
     endpoint: "/api/runtime/e2e-source",
   };
 }
 
-function buildPreviewUrl(baseUrl, binding, phase, wrongNetwork = false) {
+function buildPreviewUrl(baseUrl, binding, phase, wrongNetwork = false, launchConfig = false) {
   const url = new URL(`/${folderName}`, baseUrl);
   const resolvedPhase = phase === "dex-listed" ? "dex-listed" : "internal-market";
   const tokenStatusCode = resolvedPhase === "dex-listed" ? "2" : "1";
@@ -291,6 +300,7 @@ function buildPreviewUrl(baseUrl, binding, phase, wrongNetwork = false) {
     url.searchParams.set("previewWalletAddress", DEFAULT_WALLET_ADDRESS);
     url.searchParams.set("previewWalletChainId", String(DEFAULT_WRONG_CHAIN_ID));
   }
+  if (launchConfig) url.searchParams.set("surface", "launch-config");
   return url.toString();
 }
 
@@ -426,7 +436,7 @@ function layoutCheckScript(skipRiskStatus = false) {
   };
 }
 
-async function runOneCheck({ browser, outDir, baseUrl, binding, viewport, phase, wrongNetwork = false, skipRiskStatus = false, has3D = false, forceNoWebGL2 = false, reducedMotion = false, contextLoss = false }) {
+async function runOneCheck({ browser, outDir, baseUrl, binding, viewport, phase, wrongNetwork = false, skipRiskStatus = false, has3D = false, forceNoWebGL2 = false, reducedMotion = false, contextLoss = false, launchConfig = false }) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: 1,
@@ -441,7 +451,7 @@ async function runOneCheck({ browser, outDir, baseUrl, binding, viewport, phase,
       };
     });
   }
-  const suffix = forceNoWebGL2 ? "3d-fallback" : reducedMotion ? "3d-reduced-motion" : contextLoss ? "3d-context-loss" : wrongNetwork ? "wrong-network" : phase;
+  const suffix = launchConfig ? "launch-config" : forceNoWebGL2 ? "3d-fallback" : reducedMotion ? "3d-reduced-motion" : contextLoss ? "3d-context-loss" : wrongNetwork ? "wrong-network" : phase;
   const traceName = `${viewport.id}-${suffix}`;
   const screenshotPath = path.join(outDir, "screenshots", `${traceName}.png`);
   const tracePath = path.join(outDir, "traces", `${traceName}.zip`);
@@ -465,7 +475,7 @@ async function runOneCheck({ browser, outDir, baseUrl, binding, viewport, phase,
       externalRequests.push(request.url());
     }
   });
-  const url = buildPreviewUrl(baseUrl, binding, phase, wrongNetwork);
+  const url = buildPreviewUrl(baseUrl, binding, phase, wrongNetwork, launchConfig);
   const issues = [];
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -477,8 +487,29 @@ async function runOneCheck({ browser, outDir, baseUrl, binding, viewport, phase,
     if (/NEXT_NOT_FOUND|Application error|Unhandled Runtime Error|Build Error/i.test(bodyText)) {
       issues.push({ ruleId: "render/framework-error", message: "Preview rendered a framework or application error." });
     }
-    if (tokenUnavailableFallbackCount > 0 || /manifest-binding-mismatch|Token unavailable|代币不可用/i.test(previewText)) {
+    if (!launchConfig && (tokenUnavailableFallbackCount > 0 || /manifest-binding-mismatch|Token unavailable|代币不可用/i.test(previewText))) {
       issues.push({ ruleId: "render/token-unavailable", message: "Preview marked the runtime token as unavailable." });
+    }
+    if (launchConfig) {
+      const launchConfigRoot = previewScope.locator("[data-flap-launch-config='true']");
+      if ((await launchConfigRoot.count()) !== 1) {
+        issues.push({ ruleId: "launch-config/component-missing", message: "Launch Config preview did not render the named LaunchConfig export." });
+      } else {
+        const input = launchConfigRoot.locator("input").first();
+        const confirm = previewScope.locator("[data-launch-config-confirm='true']");
+        await input.fill("99");
+        if (!(await confirm.isDisabled())) {
+          issues.push({ ruleId: "launch-config/invalid-state", message: "Host Confirm remained enabled for invalid Launch Config values." });
+        }
+        await input.fill("1000");
+        if (await confirm.isDisabled()) {
+          issues.push({ ruleId: "launch-config/valid-state", message: "Host Confirm did not enable after valid Launch Config values." });
+        }
+        const nextPreviewText = await previewScope.innerText();
+        if (!nextPreviewText.includes("1000000000000000000000")) {
+          issues.push({ ruleId: "launch-config/structured-output", message: "Launch Config preview did not emit the expected host-visible structured value." });
+        }
+      }
     }
     const layout = await page.evaluate(layoutCheckScript, skipRiskStatus);
     issues.push(...layout.issues);
@@ -506,7 +537,7 @@ async function runOneCheck({ browser, outDir, baseUrl, binding, viewport, phase,
       }
       if (externalRequests.length) issues.push({ ruleId: "3d/external-request", message: "3D Mini App made undeclared external requests.", externalRequests: [...new Set(externalRequests)] });
     }
-    if (wrongNetwork && !/wrong network|switch wallet|switch.*chain|切换|网络/i.test(bodyText)) {
+    if (!launchConfig && wrongNetwork && !/wrong network|switch wallet|switch.*chain|切换|网络/i.test(bodyText)) {
       issues.push({ ruleId: "wallet/wrong-network-state-missing", message: "Wrong-network preview did not render a visible switch-network state." });
     }
     if (!contextLoss && consoleMessages.some(isBlockingConsoleMessage)) {
@@ -560,6 +591,7 @@ if (!fs.existsSync(manifestPath)) {
 }
 
 const manifest = readJson(manifestPath);
+const hasLaunchConfig = Array.isArray(manifest.surfaces) && manifest.surfaces.includes("launch-config");
 const skipRiskStatus = manifest.mode === MINI_APP_MODE;
 const has3D = Array.isArray(manifest.capabilities) && manifest.capabilities.includes("three-r3f-v1");
 let binding;
@@ -588,12 +620,19 @@ const checks = [];
 try {
   browser = await launchChromium();
   server = await startPreviewServer();
-  previewSource = await verifyPreviewSource(server.baseUrl, sourceFileSha256[`src/vaults/${folderName}/Component.tsx`]);
+  previewSource = await verifyPreviewSource(
+    server.baseUrl,
+    sourceFileSha256[`src/vaults/${folderName}/Component.tsx`],
+    hasLaunchConfig ? sourceFileSha256[`src/vaults/${folderName}/LaunchConfig.tsx`] : undefined,
+  );
   for (const viewport of VIEWPORTS) {
     for (const phase of REQUIRED_PHASES) {
       checks.push(await runOneCheck({ browser, outDir, baseUrl: server.baseUrl, binding, viewport, phase, skipRiskStatus, has3D }));
     }
     checks.push(await runOneCheck({ browser, outDir, baseUrl: server.baseUrl, binding, viewport, phase: "internal-market", wrongNetwork: true, skipRiskStatus, has3D }));
+    if (hasLaunchConfig) {
+      checks.push(await runOneCheck({ browser, outDir, baseUrl: server.baseUrl, binding, viewport, phase: "launch-config", skipRiskStatus: true, launchConfig: true }));
+    }
     if (has3D) checks.push(await runOneCheck({ browser, outDir, baseUrl: server.baseUrl, binding, viewport, phase: "default", skipRiskStatus, has3D, forceNoWebGL2: true }));
   }
   if (has3D) {

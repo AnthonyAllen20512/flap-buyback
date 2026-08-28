@@ -299,6 +299,7 @@ yarn vault:scaffold my-vault --name "My Vault UI" \
 ```plain text
 src/vaults/{folder-name}/
   Component.tsx
+  LaunchConfig.tsx  # 可选，仅用于 launch-config surface
   manifest.json
   VaultABI.ts
   i18n.json
@@ -315,7 +316,7 @@ register 命令会更新 `src/vaults/index.ts`，使 `/{folder-name}` 能在本�
 本地 preview 使用真实钱包 / runtime path 和安全默认 preview 地址。必要时可通过 preview URL 传入真实地址，例如 `?chainId=56&factoryAddress=0x...&tokenAddress=0x...&vaultAddress=0x...`，或 no-factory 的 `?chainId=56&vaultAddress=0x...&tokenAddress=0x...`。
 Binding resolution 是保守的：factory 模式优先精确匹配 `chainId + factoryAddress`；no-factory 模式优先精确匹配 `chainId + vaultAddress` 和可选 `tokenAddress`。只有在不歧义时才会使用 partial hint；没有 runtime hint 时才使用第一个 manifest binding。
 
-不要向模板添加辅助文件。当前文件集固定。不要在 `src/vaults/{folder-name}` 下添加 `helpers`、嵌套组件、目录、assets、docs 或其他文件。
+不要向模板添加辅助文件。当前文件集固定。需要发币时专属配置界面的 factory package 可以额外添加一个 `LaunchConfig.tsx`，并在 `manifest.surfaces` 声明 `launch-config`；其他 `helpers`、嵌套组件、目录、assets、docs 或文件仍然禁止。完整协议和测试方式见 [docs/launch-config.md](./docs/launch-config.md)。
 
 参考示例：
 
@@ -333,11 +334,12 @@ Agent contract、manifest schema 和 source package format 的版本规则记录
 Vault folder 是严格 source package 边界，只能包含：
 
 - `Component.tsx`：受控 React Vault UI component。
+- `LaunchConfig.tsx`：可选的 factory 发币配置组件；必须由 `manifest.surfaces` 声明，只返回结构化参数，不能发送交易。
 - `manifest.json`：必需 `artifactId`；必需 `match.bindings`，即显式 factory-scoped `{chainId, factoryAddress}`、no-factory `{chainId, vaultAddresses: [vaultAddress]}` 或 no-factory `{chainId, tokenAddresses}` target；每个 manifest 至少有一个 binding-scoped `tokenAddresses` 作为 Workbench/E2E 测试 token，优先测试网 token；只有 Flap 明确要求全屏 Vault 业务内容区时才可选 `layout: "fullscreen"`；可选非 oracle `endpoints`；可选 reviewed `externalFrames`；以及 `i18n`。生产限制 CA 只在 Workbench/registry 的 `caRestrictionMode` 中处理。
 - `VaultABI.ts`：只包含最小 Vault ABI fragment。标准 ERC20 ABI 由 `@/src/sdk` 导出；只有自定义非标准 token 方法才放到这里。
 - `i18n.json`：manifest `i18n` 声明的 locale dictionary；manifest locale string 至少两个字符。
 
-`src/vaults/{folder-name}` 下的任何其他文件或子目录都会触发 blocking check issue。
+除声明过的 `LaunchConfig.tsx`、Mini App 音频和 capability profile 允许的资源外，`src/vaults/{folder-name}` 下的任何其他文件或子目录都会触发 blocking check issue。
 
 ## 安全规则
 

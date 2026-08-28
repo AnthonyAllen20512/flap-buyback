@@ -173,6 +173,7 @@ const packageMarker = {
   sourcePackage: `src/vaults/${folderName}`,
   ...(manifest.mode ? { mode: manifest.mode } : {}),
   ...(manifest.capabilities ? { capabilities: manifest.capabilities } : {}),
+  ...(manifest.surfaces ? { surfaces: manifest.surfaces } : {}),
   packagedAt,
   check: {
     passed: checkSummary.blocking === 0,
@@ -204,6 +205,7 @@ const metadata = {
   ...(manifest.displayTitle ? { displayTitle: manifest.displayTitle } : {}),
   ...(manifest.mode ? { mode: manifest.mode } : {}),
   ...(manifest.capabilities ? { capabilities: manifest.capabilities } : {}),
+  ...(manifest.surfaces ? { surfaces: manifest.surfaces } : {}),
   bindingKeys: (manifest.match?.bindings || []).flatMap(bindingKeysForEntry),
   packagedAt,
   manifestSha256: sourceFileHashes[`src/vaults/${folderName}/manifest.json`],

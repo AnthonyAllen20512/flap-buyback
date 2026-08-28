@@ -148,7 +148,7 @@
     "recharts"
   ],
   "manifest": {
-    "allowedTopLevelFields": ["artifactId", "name", "displayTitle", "match", "i18n", "mode", "capabilities", "layout", "endpoints", "externalFrames"],
+    "allowedTopLevelFields": ["artifactId", "name", "displayTitle", "match", "i18n", "mode", "capabilities", "layout", "endpoints", "externalFrames", "surfaces"],
     "requiredTopLevelFields": ["artifactId", "name", "match", "i18n"],
     "artifactIdRule": "artifactId is the unique artifact identity and must match vaultui_<folder-name>_<26-char ULID>. It is validated against the Vault folder name and must be unique across src/vaults/*/manifest.json.",
     "allowedMatchFields": ["bindings"],
@@ -158,6 +158,7 @@
     "externalContractRule": "Declare fixed non-token/non-vault/non-factory contract targets inside match.bindings[].externalContracts with {address, label}. vault:check blocks contract interactions with fixed addresses outside runtime context, factoryAddress, tokenAddresses, vaultAddresses, or externalContracts.",
     "modeRule": "Omit manifest.mode for the default custom Vault UI. Set manifest.mode to mini-app only for token-scoped Mini App artifacts whose match.bindings[].tokenAddresses entries all end in 7777 or all end in 8888; mini-app mode is strongly bound to token addresses, keeps the same core source-package boundary with an extra top-level reviewed audio-asset exception, requires bilingual displayTitle, and skips Vault risk-status tag checks. Never mix 7777 and 8888 in one Mini App artifact.",
     "threeR3FRule": "three-r3f-v1 accepts three surfaces: mode omitted with every proof token ending in 7777 for default Vault UI, mode=mini-app with only 7777 Tax Token bindings, or mode=mini-app with only 8888 zero-tax bindings. The mode-less 7777 Vault UI supports factory, single-Vault, and token bindings and keeps default Vault risk, shell, audio, layout, and displayTitle rules; both Mini App surfaces are token-only and keep Mini App rules.",
+    "launchConfigRule": "A factory-scoped artifact may declare surfaces containing launch-config. It must add LaunchConfig.tsx and re-export it as named LaunchConfig from Component.tsx. LaunchConfig receives host context/messages/onChange, returns structured values matching the on-chain vaultDataSchema, and must not ABI-encode, simulate, write, or render the final host confirmation. Omitted surfaces means legacy vault-ui only.",
     "miniAppLayoutRule": "Mini App Component.tsx must put a full-height class or inline height on the outermost returned layout element, for example min-h-[100vh], min-h-screen, min-h-full, or h-full.",
     "layoutRule": "Omit manifest.layout for the standard 768px Vault body. Set layout to fullscreen only when Flap explicitly requests a full-screen Vault body; this triggers manual-review/fullscreen-layout and flap.sh remains responsible for host-owned token/header constraints.",
     "disallowedTopLevelFields": ["id", "owner", "version", "sdkVersion", "actions", "oracles", "media", "fallback", "contracts", "chainIds", "restrictTokenAddresses", "tokenAddresses", "caPolicy"],
@@ -286,7 +287,10 @@
     "i18n-policy/missing-locale-key": { "severity": "blocking", "fixAction": "Add the missing key to each locale declared by manifest.i18n." },
     "i18n-policy/used-key-missing-locale": { "severity": "blocking", "fixAction": "Every key used by t(...) or i18n.t(...) must exist in each declared locale." },
     "imports-and-dependencies/deep-shared-runtime-import": { "severity": "blocking", "fixAction": "Import shared runtime helpers from the @/src/sdk or @/src/ui barrel. Do not import @/src/sdk/* or @/src/ui/* deep paths." },
-    "imports-and-dependencies/disallowed-relative-import": { "severity": "blocking", "fixAction": "Inline small helpers in Component.tsx or use @/src/sdk and @/src/ui. The only local relative import is ./VaultABI." },
+    "imports-and-dependencies/disallowed-relative-import": { "severity": "blocking", "fixAction": "Inline small helpers in Component.tsx or use @/src/sdk and @/src/ui. Local relative imports are ./VaultABI and the manifest-declared ./LaunchConfig surface only." },
+    "launch-config/missing-component": { "severity": "blocking", "fixAction": "Add LaunchConfig.tsx or remove launch-config from manifest.surfaces." },
+    "launch-config/missing-export": { "severity": "blocking", "fixAction": "Re-export the component from Component.tsx as: export { default as LaunchConfig } from \"./LaunchConfig\"." },
+    "launch-config/write-capability": { "severity": "blocking", "fixAction": "Remove transaction simulation/writes and TxButton from LaunchConfig.tsx. Return structured values through onChange; flap.sh owns confirmation and launch writes." },
     "imports-and-dependencies/dynamic-import": { "severity": "blocking", "fixAction": "Use static imports only." },
     "imports-and-dependencies/external-sdk-package": { "severity": "blocking", "fixAction": "Do not introduce additional SDK packages. Use only the shared @/src/sdk and @/src/ui runtime surfaces." },
     "imports-and-dependencies/forbidden-import": { "severity": "blocking", "fixAction": "Use Flap SDK/UI primitives instead of host wallet, app, or heavy UI dependencies." },
@@ -659,6 +663,7 @@
       },
       "requiredSourceFiles": [
         "src/vaults/<folder-name>/Component.tsx",
+        "src/vaults/<folder-name>/<optional-LaunchConfig.tsx>",
         "src/vaults/<folder-name>/manifest.json",
         "src/vaults/<folder-name>/VaultABI.ts",
         "src/vaults/<folder-name>/i18n.json",
@@ -666,6 +671,7 @@
       ],
       "fileSha256": {
         "src/vaults/<folder-name>/Component.tsx": "<sha256>",
+        "src/vaults/<folder-name>/<optional-LaunchConfig.tsx>": "<sha256>",
         "src/vaults/<folder-name>/manifest.json": "<sha256>",
         "src/vaults/<folder-name>/VaultABI.ts": "<sha256>",
         "src/vaults/<folder-name>/i18n.json": "<sha256>",
@@ -700,7 +706,7 @@
     "default Vault UI contract risk status appears within the first three visible Vault-specific business rows/blocks and before any preview, hero, banner, showcase, media, chart, or large visual block",
     "default Vault UI has no Low risk / 低风险 label or reassuring low-risk copy unless selected from host riskLevel === 1",
     "write-capable flows preview a wrong-network state and render a switch-network path instead of sending writes on the wrong chain",
-    "Default Vault folder contains only the four core files; Mini App may add reviewed top-level audio, and only three-r3f-v1 may add recursively statically reachable profile-approved source and 3D assets",
+    "Default Vault folder contains only the four core files plus optional manifest-declared LaunchConfig.tsx; Mini App may add reviewed top-level audio, and only three-r3f-v1 may add recursively statically reachable profile-approved source and 3D assets",
     "Component.tsx follows a public-safe pattern from docs/ui-pattern-snippets.md",
     "action availability stage is decided and reflected in visible enabled/disabled states",
     "all Component.tsx user-facing copy is in i18n.json, with no hardcoded locale text, countdown units, preview fallback names, labels, notices, or button text in Component.tsx",

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { assertRuntimePackageIdentity } from "./runtime-package-mode.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -22,6 +24,25 @@ async function readJson(filePath) {
 
 async function readText(filePath) {
   return readFile(filePath, "utf8");
+}
+
+function parseArgs(args) {
+  let packageDir = DEFAULT_PACKAGE_DIR;
+  let packageDirProvided = false;
+  let mode = "release";
+
+  for (const arg of args) {
+    if (arg === "--canary") {
+      mode = "canary";
+      continue;
+    }
+    if (arg.startsWith("--")) throw new Error(`Unknown runtime package verify option ${arg}.`);
+    if (packageDirProvided) throw new Error("Pass at most one runtime package directory.");
+    packageDir = path.resolve(process.cwd(), arg);
+    packageDirProvided = true;
+  }
+
+  return { packageDir, mode };
 }
 
 function collectRelativeJsSpecifiers(source) {
@@ -69,19 +90,46 @@ async function expectRejection(task, messagePattern, label) {
   throw new Error(`${label} unexpectedly succeeded.`);
 }
 
+async function createPackPreview(packageDir) {
+  const npmCacheDir = await mkdtemp(path.join(os.tmpdir(), "flap-runtime-npm-cache-"));
+  try {
+    return JSON.parse(
+      execFileSync("npm", ["pack", "--json", "--dry-run"], {
+        cwd: packageDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          npm_config_cache: npmCacheDir,
+          npm_config_update_notifier: "false",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+  } finally {
+    await rm(npmCacheDir, { recursive: true, force: true });
+  }
+}
+
 async function main() {
-  const packageDir = process.argv[2] ? path.resolve(process.cwd(), process.argv[2]) : DEFAULT_PACKAGE_DIR;
+  const { packageDir, mode } = parseArgs(process.argv.slice(2));
 
   for (const file of EXPECTED_FILES) {
     await ensureFile(path.join(packageDir, file));
   }
 
-  const [manifest, runtimeContract, sdkSource, uiSource] = await Promise.all([
+  const [manifest, runtimeContract, sdkSource, uiSource, rootPackage] = await Promise.all([
     readJson(path.join(packageDir, "package.json")),
     readJson(path.join(packageDir, "runtime-contract.json")),
     readText(path.join(packageDir, "sdk.js")),
     readText(path.join(packageDir, "ui.js")),
+    readJson(path.join(ROOT, "package.json")),
   ]);
+
+  const gitHead = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  }).trim();
+  assertRuntimePackageIdentity({ manifest, runtimeContract, rootVersion: rootPackage.version, gitHead, mode });
 
   for (const key of EXPECTED_EXPORTS) {
     if (!(key in manifest.exports)) {
@@ -230,13 +278,7 @@ async function main() {
     throw new Error(`Maximum accepted NFT image exceeds the host response budget: ${serializedResponseBytes} bytes.`);
   }
 
-  const packPreview = JSON.parse(
-    execFileSync("npm", ["pack", "--json", "--dry-run"], {
-      cwd: packageDir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }),
-  );
+  const packPreview = await createPackPreview(packageDir);
 
   for (const previewEntry of packPreview) {
     if (previewEntry?.name !== EXPECTED_PACKAGE_NAME) {
@@ -251,6 +293,10 @@ async function main() {
         packageDir: path.relative(ROOT, packageDir),
         packageAbsolutePath: packageDir,
         packageName: manifest.name,
+        packageVersion: manifest.version,
+        mode,
+        publishable: manifest.private !== true,
+        gitHead: manifest.gitHead,
         runtimeContractVersion: runtimeContract.runtimeContractVersion,
         sharedRuntimeContextChunk,
         exports: EXPECTED_EXPORTS,

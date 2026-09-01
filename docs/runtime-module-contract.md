@@ -255,7 +255,7 @@ The same host boundary owns Vault V2 NFT metadata resolution. `NftMetadataImage`
 
 The shared `./ui` entrypoint also owns `BinanceImage`, the sole component-facing exception for direct third-party image bytes. It validates every static or dynamic `src` at render time and accepts only absolute HTTPS URLs on the exact `bin.bnbstatic.com` hostname, without credentials or alternate ports. Its pathname is intentionally unrestricted. It forces lazy loading, async decoding, and `referrerPolicy="no-referrer"`; source packages cannot override those fields or use `srcSet`. Hosts do not need a proxy for this path, but their CSP must continue allowing HTTPS images.
 
-Oracle provider logic belongs in the shared runtime package when it is more than static HTTPS forwarding. Pyth/Hermes-style providers that need path templates, fixed price ids, response transforms into EVM bytes, or publish-time window checks should be exported by `@flapsdk/vault-runtime/server`. Workbench and `flap.sh` should not carry their own copies of those adapters; their route handlers should validate local proxy limits and call the shared runtime helper. This keeps the component contract as `sdk.readOracle(...)` while preventing host-specific oracle behavior drift.
+Oracle provider logic belongs in the shared runtime package when it is more than static HTTPS forwarding. Provider adapters that need path templates, fixed identifiers, response transforms, or publish-time window checks should be exported by `@flapsdk/vault-runtime/server`. Workbench and `flap.sh` should not carry their own copies of those adapters; their route handlers should validate local proxy limits and call the shared runtime helper. A provider that is unavailable must fail closed instead of being replaced with data that has different semantics. This keeps the component contract as `sdk.readOracle(...)` while preventing host-specific oracle behavior drift.
 
 That shared surface also owns the reviewed frame primitive. Components may render at most one `ReviewedFrame`, and only with a static URL declared in the single `manifest.externalFrames` entry; Workbench and production hosts can rely on source-package review plus the `ReviewedFrame` primitive first. CSP `frame-src` allowlisting is optional follow-up hardening, not a required host change for this template contract.
 
@@ -316,6 +316,15 @@ yarn runtime:verify-package
 ```
 
 They build a packable runtime package under `dist/vault-runtime`, emit a `package.json` with subpath exports, and write a machine-readable `runtime-contract.json`. Before building, the script requires local `HEAD` to exactly match latest `origin/main`, then checks npm latest `@flapsdk/vault-runtime` against the local root version and published `gitHead` so a behind, ahead, diverged, or stale checkout cannot produce an outdated runtime package. This does not change Vault source authoring; it proves that the shared runtime surface can be extracted and npm-packed without forcing `Component.tsx` authors to abandon `@/src/sdk` / `@/src/ui`.
+
+Feature-branch runtime changes use a separate non-release canary path:
+
+```bash
+yarn runtime:pack:canary
+yarn runtime:test:canary dist/npm/<generated-package>.tgz --consumer /absolute/path/to/consumer --script typecheck --script build
+```
+
+The canary builder requires a clean committed worktree, derives a private prerelease version from the current git head, omits public publish configuration, runs the same runtime package verifier, and emits a real npm `.tgz` plus SHA-256 under `dist/npm`. The consumer helper validates that exact archive with an isolated npm install, swaps only the consumer's installed runtime while it runs named `package.json` scripts, then restores the original runtime. It does not edit consumer dependency files. Canary success is pre-merge compatibility evidence only; it cannot replace the official-main freshness gate, release version bump, npm publish review, or downstream rollout approval.
 
 The current runtime package also carries the public oracle provisioning surface:
 

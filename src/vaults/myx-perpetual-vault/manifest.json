@@ -1,0 +1,27 @@
+{
+  "artifactId": "vaultui_myx-perpetual-vault_01M2FH5W6K330CC98TSQFYWPCS",
+  "name": "MYX Perpetual Contract Vault UI",
+  "match": {
+    "bindings": [
+      {
+        "chainId": 56,
+        "factoryAddress": "0xeaEEa9c17a5376497C44fE2a5F9c63FE3B23bf87",
+        "externalContracts": [
+          { "address": "0x55d398326f99059fF775485246999027B3197955", "label": "MYX market quote asset: USDT on BNB Chain" },
+          { "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", "label": "MYX market quote asset: USDC on BNB Chain" }
+        ],
+        "tokenAddresses": [
+          "0x8e37914810e887a9983ba67f3fffc285f07b7777"
+        ]
+      }
+    ]
+  },
+  "i18n": [
+    "en",
+    "zh"
+  ],
+  "surfaces": [
+    "vault-ui",
+    "launch-config"
+  ]
+}

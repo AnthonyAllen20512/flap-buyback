@@ -497,7 +497,8 @@ async function runOneCheck({ browser, outDir, baseUrl, binding, viewport, phase,
       } else {
         const input = launchConfigRoot.locator("input").first();
         const confirm = previewScope.locator("[data-launch-config-confirm='true']");
-        await input.fill("99");
+        // Both shipped threshold forms reject zero; do not assume a 100-token minimum for every factory.
+        await input.fill("0");
         if (!(await confirm.isDisabled())) {
           issues.push({ ruleId: "launch-config/invalid-state", message: "Host Confirm remained enabled for invalid Launch Config values." });
         }

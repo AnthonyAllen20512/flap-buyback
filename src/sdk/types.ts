@@ -235,6 +235,8 @@ export interface VaultLaunchSchemaField {
   name: string;
   fieldType: string;
   description?: string;
+  /** On-chain display metadata; values returned by components remain base-unit values. */
+  decimals?: number;
 }
 
 export interface VaultLaunchSchema {

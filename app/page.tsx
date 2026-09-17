@@ -10,6 +10,7 @@ import { useLang } from "@/src/i18n/useLang";
 import type { VaultManifest } from "@/src/sdk";
 import { createLocalOracleReader, VaultRuntimeProvider } from "@/src/sdk";
 import { FlapNavbar } from "@/src/shell/FlapNavbar";
+import { DeveloperSurfaceEntry } from "@/src/shell/DeveloperSurfaceEntry";
 import exampleManifest from "@/src/vaults/example/manifest.json";
 import exampleI18n from "@/src/vaults/example/i18n.json";
 
@@ -168,6 +169,7 @@ export default function HomePage() {
 
         <main style={{ padding: "56px 0 120px" }}>
           <div style={{ maxWidth: 1080, margin: "0 auto", padding: "0 clamp(16px,4vw,32px)" }}>
+            <DeveloperSurfaceEntry />
             <MiniAppGuide doc={miniApp} galleryOnly />
             <ModeTabs mode={docMode} onChange={setDocMode} labels={sop.modeTabs} />
 

@@ -9,6 +9,8 @@ import { FlapPreviewShell } from "./FlapPreviewShell";
 import { MiniAppPreviewShell } from "./MiniAppPreviewShell";
 import { vaultModules } from "@/src/vaults";
 import { LaunchConfigPreviewShell } from "./LaunchConfigPreviewShell";
+import { PreviewSurfaceNav } from "./PreviewSurfaceNav";
+import { readPreviewSurface } from "./previewSurface";
 
 interface LoadedVault {
   Component: ComponentType<VaultComponentProps>;
@@ -67,17 +69,21 @@ export function VaultPreviewClient({ folderName }: { folderName: string }) {
   }
 
   const { Component, LaunchConfig, manifest, i18n } = loaded;
-  const requestedSurface = searchParams.get("surface") ?? searchParams.get("tab");
-  const showLaunchConfig =
-    Boolean(LaunchConfig && manifest.surfaces?.includes("launch-config")) &&
-    (requestedSurface === "launch-config" || requestedSurface === "custom");
-  if (showLaunchConfig && LaunchConfig) {
-    return <LaunchConfigPreviewShell manifest={manifest} i18n={i18n} Component={LaunchConfig} />;
+  const requestedSurface = readPreviewSurface(searchParams);
+  const hasLaunchConfig = Boolean(LaunchConfig && manifest.surfaces?.includes("launch-config"));
+  if (requestedSurface === "launch-config") {
+    return <>
+      <PreviewSurfaceNav active={requestedSurface} />
+      {hasLaunchConfig && LaunchConfig ? <LaunchConfigPreviewShell folderName={folderName} manifest={manifest} i18n={i18n} Component={LaunchConfig} /> : <main className="min-h-screen bg-[#070808] p-6"><Alert tone="warning">{lang.home.surfaces.unavailable}</Alert></main>}
+    </>;
   }
   const Shell = manifest.mode === "mini-app" ? MiniAppPreviewShell : FlapPreviewShell;
   return (
+    <>
+    {hasLaunchConfig ? <PreviewSurfaceNav active={requestedSurface} /> : null}
     <Shell folderName={folderName} manifest={manifest} i18n={i18n}>
       <Component />
     </Shell>
+    </>
   );
 }

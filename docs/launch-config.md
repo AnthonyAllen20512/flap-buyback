@@ -63,7 +63,11 @@ yarn dev
 http://localhost:3000/{folder-name}?surface=launch-config
 ```
 
-`?tab=custom` remains an alias for the hosted example link. The preview shell supplies mock launch context, displays the structured values returned by the component, and keeps its host-owned Confirm button disabled until the result is valid.
+The developer homepage offers two entries. Open `/{folder-name}?surface=vault-ui` for the post-launch UI and `/{folder-name}?surface=launch-config` for the launch form; preview navigation switches between them while preserving language and runtime URL parameters. Packages without a declared/exported LaunchConfig show an explicit unavailable state instead of silently showing the Vault UI.
+
+`?tab=custom` remains an alias for the hosted example link. Only `/example` supplies an explicitly labelled demonstration schema. Other launch previews read `vaultDataSchema()` from the manifest factory on its chain using the shared `VAULT_LAUNCH_SCHEMA_ABI` and `parseVaultLaunchSchema` SDK helpers. Schema read/parse failure and returned-field mismatches keep host confirmation disabled. `schema.fields[].decimals` is display metadata; component results use base units, not human-readable amounts. `isVaultLaunchConfigResultForSchema` checks payload shape only; it does not replace host ABI type/policy validation.
+
+The `myx-perpetual-vault` local integration example pairs the existing generated Vault component with a MYX market quote selector and native BNB thresholds. A blank per-call cap means `maxUint256`; both native-launch gas fields are zero. The two fixed market quote asset addresses remain declared review candidates. This example is not publish approval. Preview confirmation is inert and never sends a transaction.
 
 Then run the normal validation pipeline:
 

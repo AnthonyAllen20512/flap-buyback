@@ -130,6 +130,8 @@ src/vaults/{folder-name}/<optional-mini-app-audio>.mp3
 
 For a factory-scoped launch configuration surface, follow `docs/launch-config.md`. `LaunchConfig.tsx` may only collect structured schema values through `onChange`; it must not ABI-encode, simulate, write, or render the final host confirmation. `Component.tsx` must re-export it as the named `LaunchConfig` export, and `manifest.surfaces` must include `launch-config`.
 
+Use separate preview URLs for the same package: `/{folder-name}?surface=vault-ui` and `/{folder-name}?surface=launch-config`. The homepage and preview navigation expose both choices. Custom launch previews read the factory schema from chain; only `/example` uses explicitly labelled fixture parameters. Use the shared SDK LaunchConfig types, `VAULT_LAUNCH_SCHEMA_ABI`, `parseVaultLaunchSchema` and the result shape guard in hosts, not duplicate contracts. A schema read failure or a result mismatch cannot enable confirmation. Return base-unit values even when schema decimal metadata is present.
+
 If the Vault files were generated directly from a provided manifest instead of using `vault:scaffold`, run:
 
 ```bash

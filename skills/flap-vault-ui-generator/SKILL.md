@@ -60,6 +60,7 @@ chainId + tokenAddress
    - `src/vaults/{folder-name}/VaultABI.ts`
    - `src/vaults/{folder-name}/i18n.json`
 13. If scaffold did not create the package, run `yarn vault:register {folder-name}` after the four files exist. Do not hand-edit `src/vaults/index.ts` unless the script reports an unexpected index shape.
+    For an optional factory launch form, also add `LaunchConfig.tsx`, declare `surfaces: ["vault-ui", "launch-config"]` and re-export the named LaunchConfig from Component.tsx. Follow `docs/launch-config.md`; use shared SDK props and return base-unit values without encoding or transactions. Preview both surface URLs. Custom launch previews require real factory schema reads; only the labelled example fixture may use demonstration parameters.
 14. Run:
 
 ```bash

@@ -46,6 +46,8 @@ When using an external visual reference such as 涅槃, extract only section hie
 
 ## Coverage Matrix
 
+Launch forms are a separate optional surface, not part of the post-launch card. Put them in `LaunchConfig.tsx`, declare both manifest surfaces, and re-export the named LaunchConfig from Component. Use the shared SDK props and return structured base-unit values via onChange. Group related parameters with labels, unit hints and visible validation errors. The host owns schema reads, ABI/policy validation, final confirmation and transactions. Preview the Vault card and launch form using their separate surface URLs; do not duplicate host confirmation inside the form.
+
 The public-safe snippets in this document cover the historical custom Vault UI shapes as reusable behavior categories:
 
 | Historical UI Shape | Public-Safe Pattern To Use |

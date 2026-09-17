@@ -21,6 +21,31 @@
     "robinhoodTestnet": "Robinhood 测试网"
   },
   "home": {
+    "surfaces": {
+      "title": "选择要开发的界面",
+      "description": "同一个金库有两个使用场景：创建代币前填写金库参数，发币后查看和操作金库。",
+      "vaultTitle": "金库界面",
+      "vaultDescription": "发币后展示金库数据、用户仓位和操作。开发默认导出的 Component 组件。",
+      "launchTitle": "发币配置界面",
+      "launchDescription": "创建代币前填写并校验工厂参数。开发命名导出的 LaunchConfig 组件，交易由主站负责。",
+      "openPreview": "打开示例预览",
+      "packageNotice": "发币配置界面是可选项。两种界面共用一个源码 ZIP，在 Workbench 分别预览审核。",
+      "previewLabel": "选择预览界面",
+      "back": "开发者指南",
+      "unavailable": "这个组件包尚未声明发币配置界面。请添加 LaunchConfig.tsx、命名导出和 manifest.surfaces，或切回金库预览。",
+      "hostBoundary": "组件收集参数；宿主负责校验、编码、最终确认和发币交易。",
+      "fixtureNotice": "示例模式：这里使用演示参数，不是链上真实 Factory 的参数定义。",
+      "liveSchemaNotice": "此预览从链上读取所选 Factory 的参数定义，不会创建代币。",
+      "missingFactory": "尚未声明 Factory 绑定，请在 manifest 中填写正确的 Factory 地址。",
+      "schemaLoading": "正在读取 Factory 的发币参数…",
+      "schemaFailed": "无法读取 Factory 参数定义，或返回数据无效。请检查网络和合约绑定。",
+      "invalidResult": "组件回传的参数与 Factory 字段不匹配，确认已禁用。",
+      "previewConfirm": "预览宿主确认",
+      "noTransactionNotice": "仅供预览：这个按钮不会连接钱包或发送交易。",
+      "demoLabel": "永续金库本地联调示例",
+      "demoVault": "预览永续金库界面",
+      "demoLaunch": "预览永续金库发币配置"
+    },
     "sop": {
       "brand": "Flap Vault UI Template",
       "kicker": "Vault UI 定制 SOP",

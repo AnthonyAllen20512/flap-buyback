@@ -117,6 +117,8 @@
     "previewRegistrationRule": "Local preview uses src/vaults/index.ts as a static module map. vault:scaffold registers the folder automatically. If the four files already exist, run yarn vault:register {folder-name}; do not hand-edit registration unless the script cannot parse the index file.",
     "requiredFiles": ["Component.tsx", "manifest.json", "VaultABI.ts", "i18n.json"],
     "allowedFiles": ["Component.tsx", "manifest.json", "VaultABI.ts", "i18n.json"],
+    "optionalSurfaceFiles": { "launch-config": ["LaunchConfig.tsx"] },
+    "launchConfigBoundary": "LaunchConfig.tsx is allowed only with a factory binding, manifest.surfaces containing launch-config and the named LaunchConfig re-export in Component.tsx. It collects base-unit structured values; the host reads schemas, validates types/policies, encodes and confirms.",
     "allowedMiniAppAudioAssets": {
       "mode": "mini-app only",
       "placement": "Top-level files directly under src/vaults/{folder-name}; nested audio folders are not allowed.",
@@ -127,7 +129,7 @@
     "registrationFile": "src/vaults/index.ts"
   },
   "allowedImports": {
-    "localRelative": ["./VaultABI", "Mini App mode may also import top-level reviewed audio assets such as ./bgm.mp3"],
+    "localRelative": ["./VaultABI", "./LaunchConfig only when manifest.surfaces declares launch-config", "Mini App mode may also import top-level reviewed audio assets such as ./bgm.mp3"],
     "packagePrefixes": ["react", "viem", "decimal.js", "lucide-react"],
     "sharedRuntimeModules": ["@/src/sdk", "@/src/ui"],
     "sharedRuntimeOnlyRule": "Do not introduce any additional SDK package or SDK-like runtime wrapper. Vault source may use only exact imports from the shared @/src/sdk and @/src/ui barrel surfaces plus the explicit default allowlist; deep imports such as @/src/sdk/format or @/src/ui/Button are not allowed.",
@@ -600,7 +602,7 @@
     },
     {
       "step": "preview-local-route",
-      "description": "Run yarn dev and open /{folder-name}. If it 404s, run yarn vault:check {folder-name} and fix preview-registration/missing-vault-module."
+      "description": "Run yarn dev and open /{folder-name}?surface=vault-ui or /{folder-name}?surface=launch-config. The developer entry and preview navigation expose both surfaces. Only example uses an explicitly labelled schema fixture; custom launch previews read vaultDataSchema from the manifest factory. Read failure or malformed results must disable confirmation. If the route 404s, fix preview-registration/missing-vault-module."
     },
     {
       "step": "validate-and-package",

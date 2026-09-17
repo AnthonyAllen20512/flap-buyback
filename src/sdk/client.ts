@@ -4,6 +4,7 @@ export * from "./contract";
 export * from "./erc20";
 export * from "./format";
 export * from "./ipfsImage";
+export * from "./launchConfig";
 export * from "./nftMetadata";
 export * from "./oracle";
 export * from "./three";

@@ -21,6 +21,31 @@
     "robinhoodTestnet": "Robinhood Testnet"
   },
   "home": {
+    "surfaces": {
+      "title": "Choose the interface you want to develop",
+      "description": "Two interfaces for the same Vault: launch configuration before token creation, and Vault operations after launch.",
+      "vaultTitle": "Vault interface",
+      "vaultDescription": "Show Vault data, positions and user actions after launch. Develop the default Component export.",
+      "launchTitle": "Token launch configuration",
+      "launchDescription": "Collect and validate factory parameters before creating a token. Develop the named LaunchConfig export; the host owns the transaction.",
+      "openPreview": "Open example preview",
+      "packageNotice": "Launch configuration is optional. Both interfaces share one source ZIP and are reviewed separately in Workbench.",
+      "previewLabel": "Choose preview interface",
+      "back": "Developer guide",
+      "unavailable": "This package has no declared LaunchConfig interface. Add LaunchConfig.tsx, its named export and manifest.surfaces, or return to the Vault preview.",
+      "hostBoundary": "The component collects parameters. The host owns validation, encoding, confirmation and the launch transaction.",
+      "fixtureNotice": "Example fixture: these are demonstration parameters, not a live factory schema.",
+      "liveSchemaNotice": "This preview reads the selected factory's schema from the blockchain. It does not create a token.",
+      "missingFactory": "No factory binding is declared. Add the correct factory address to the manifest.",
+      "schemaLoading": "Reading the factory's launch parameters…",
+      "schemaFailed": "The factory schema could not be loaded or is invalid. Check the network and contract binding.",
+      "invalidResult": "The component returned values that do not match the factory fields. Confirmation is disabled.",
+      "previewConfirm": "Preview host confirmation",
+      "noTransactionNotice": "Preview only. This button does not connect a wallet or send a transaction.",
+      "demoLabel": "Perpetual Vault local integration demo",
+      "demoVault": "Preview perpetual Vault",
+      "demoLaunch": "Preview perpetual launch configuration"
+    },
     "sop": {
       "brand": "Flap Vault UI Template",
       "kicker": "Vault UI Customization SOP",

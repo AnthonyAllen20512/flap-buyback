@@ -60,12 +60,6 @@ export const vaultModules: Record<string, VaultModule> = {
     loadManifest: () => import("./flap-gamefi-arena/manifest.json") as Promise<{ default: VaultManifest }>,
     loadI18n: () => import("./flap-gamefi-arena/i18n.json") as Promise<{ default: Record<string, Record<string, string>> }>,
   },
-  "myx-perpetual-vault": {
-    folderName: "myx-perpetual-vault",
-    loadComponent: () => import("./myx-perpetual-vault/Component"),
-    loadManifest: () => import("./myx-perpetual-vault/manifest.json") as Promise<{ default: VaultManifest }>,
-    loadI18n: () => import("./myx-perpetual-vault/i18n.json") as Promise<{ default: Record<string, Record<string, string>> }>,
-  },
 };
 
 export function getVaultFolderNames() {

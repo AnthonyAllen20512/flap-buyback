@@ -41,10 +41,7 @@
       "schemaFailed": "无法读取 Factory 参数定义，或返回数据无效。请检查网络和合约绑定。",
       "invalidResult": "组件回传的参数与 Factory 字段不匹配，确认已禁用。",
       "previewConfirm": "预览宿主确认",
-      "noTransactionNotice": "仅供预览：这个按钮不会连接钱包或发送交易。",
-      "demoLabel": "永续金库本地联调示例",
-      "demoVault": "预览永续金库界面",
-      "demoLaunch": "预览永续金库发币配置"
+      "noTransactionNotice": "仅供预览：这个按钮不会连接钱包或发送交易。"
     },
     "sop": {
       "brand": "Flap Vault UI Template",

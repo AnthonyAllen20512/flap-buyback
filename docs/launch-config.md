@@ -67,8 +67,6 @@ The developer homepage offers two entries. Open `/{folder-name}?surface=vault-ui
 
 `?tab=custom` remains an alias for the hosted example link. Only `/example` supplies an explicitly labelled demonstration schema. Other launch previews read `vaultDataSchema()` from the manifest factory on its chain using the shared `VAULT_LAUNCH_SCHEMA_ABI` and `parseVaultLaunchSchema` SDK helpers. Schema read/parse failure and returned-field mismatches keep host confirmation disabled. `schema.fields[].decimals` is display metadata; component results use base units, not human-readable amounts. `isVaultLaunchConfigResultForSchema` checks payload shape only; it does not replace host ABI type/policy validation.
 
-The `myx-perpetual-vault` local integration example pairs the existing generated Vault component with a MYX market quote selector and native BNB thresholds. A blank per-call cap means `maxUint256`; both native-launch gas fields are zero. The two fixed market quote asset addresses remain declared review candidates. This example is not publish approval. Preview confirmation is inert and never sends a transaction.
-
 Then run the normal validation pipeline:
 
 ```bash

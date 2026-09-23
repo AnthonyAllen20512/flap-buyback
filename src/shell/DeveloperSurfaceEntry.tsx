@@ -21,13 +21,6 @@ export function DeveloperSurfaceEntry() {
         ))}
       </div>
       <p className="mt-4 text-xs leading-5 text-[#84888C]">{copy.packageNotice}</p>
-      <div className="mt-5 border-t border-[#303236] pt-4">
-        <p className="text-sm text-white/70">{copy.demoLabel}</p>
-        <div className="mt-3 flex flex-wrap gap-3 text-sm text-[#A99AFF]">
-          <Link href={`/myx-perpetual-vault?surface=vault-ui&lang=${languageCode}`} className="rounded-md px-2 py-1 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#5533FF]">{copy.demoVault}</Link>
-          <Link href={`/myx-perpetual-vault?surface=launch-config&lang=${languageCode}`} className="rounded-md px-2 py-1 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#5533FF]">{copy.demoLaunch}</Link>
-        </div>
-      </div>
     </section>
   );
 }

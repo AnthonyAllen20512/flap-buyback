@@ -41,10 +41,7 @@
       "schemaFailed": "The factory schema could not be loaded or is invalid. Check the network and contract binding.",
       "invalidResult": "The component returned values that do not match the factory fields. Confirmation is disabled.",
       "previewConfirm": "Preview host confirmation",
-      "noTransactionNotice": "Preview only. This button does not connect a wallet or send a transaction.",
-      "demoLabel": "Perpetual Vault local integration demo",
-      "demoVault": "Preview perpetual Vault",
-      "demoLaunch": "Preview perpetual launch configuration"
+      "noTransactionNotice": "Preview only. This button does not connect a wallet or send a transaction."
     },
     "sop": {
       "brand": "Flap Vault UI Template",

@@ -42,6 +42,12 @@ See `docs/versioning.md` for the rules that govern when each surface increments.
 - Removed the project-specific `src/vaults/cz-burn-dividend-vault-v1` package that had leaked into the public template, and deregistered it from `src/vaults/index.ts`.
 - `vault:e2e` now starts the local preview with `yarn.cmd` on Windows and reports missing Playwright Chromium as machine-readable JSON with the `yarn playwright install chromium` fix hint.
 
+## [0.1.31] - 2026-09-23
+
+### Added
+
+- Added the optional factory-scoped `launch-config` component surface, shared schema/result helpers, dual-surface local previews, manifest validation, packaging metadata, and compatibility checks for legacy Vault UI-only artifacts.
+
 ## [0.1.9] - 2026-06-12
 
 ### Changed

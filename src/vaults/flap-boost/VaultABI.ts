@@ -18,6 +18,7 @@ export const vaultAbi = parseAbi([
   "function getTokenPreview(address token, address account) view returns (string symbol, uint8 decimals, uint256 balance)",
   "function createTask((uint8 buybackMode, uint256 amountPerRound, uint64 intervalSeconds, uint16 maxSlippageBps, uint8 outputMode, address retainRecipient, uint8 distributionMode, uint32 randomHolderCount, address[] fixedRecipients, address targetToken) config) returns (uint256 taskId)",
   "function fundBNB() payable",
+  "function sync()",
   "function withdrawBNB(address recipient, uint256 amount)",
   "function updateTask(uint256 taskId, (uint8 buybackMode, uint256 amountPerRound, uint64 intervalSeconds, uint16 maxSlippageBps, uint8 outputMode, address retainRecipient, uint8 distributionMode, uint32 randomHolderCount, address[] fixedRecipients, address targetToken) config)",
   "function fundTask(uint256 taskId) payable",

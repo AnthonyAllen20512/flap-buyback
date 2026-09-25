@@ -397,6 +397,18 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     }, t("messages.withdrawn"));
   }
 
+  async function checkFundsAndSchedule() {
+    if (!canWrite || !isOwner) return;
+    await runAction("sync-tasks", async () => {
+      setTxState("simulating");
+      const simulation = await sdk.simulateContract({ contract: "vault", address: vaultAddress, abi: vaultAbi, functionName: "sync" });
+      setTxState("writing");
+      const hash = await sdk.writeContract(simulation.request);
+      setTxState("confirming");
+      await sdk.waitForTx(hash);
+    }, t("messages.tasksChecked"));
+  }
+
   async function taskAction(taskId: bigint, action: "pauseTask" | "resumeTask" | "closeTask") {
     if (!canWrite || !isOwner) return;
     const key = action + ":" + taskId.toString();
@@ -489,7 +501,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     <div className="mt-3 border-t border-white/10 pt-3"><TxButton idleLabel={t("buttons.createTask")} state={buttonState("create-task")} onClick={() => void createTask()} disabled={!canWrite || !isOwner || config instanceof Error || !tokenPreview} /></div>
                   </div>
                 ) : null}
-                <TaskTable t={t} nowSeconds={nowSeconds} tasks={snapshot?.tasks ?? []} taskTokens={snapshot?.taskTokens ?? {}} modeOptions={modeOptions} outputOptions={outputOptions} buttonState={buttonState} canWrite={canWrite} isOwner={isOwner} onAction={(id, action) => void taskAction(id, action)} />
+                <TaskTable t={t} nowSeconds={nowSeconds} tasks={snapshot?.tasks ?? []} taskTokens={snapshot?.taskTokens ?? {}} modeOptions={modeOptions} outputOptions={outputOptions} buttonState={buttonState} canWrite={canWrite} isOwner={isOwner} onCheckFunds={() => void checkFundsAndSchedule()} onAction={(id, action) => void taskAction(id, action)} />
               </section>
             </>
           )}
@@ -510,11 +522,12 @@ interface TaskTableProps {
   buttonState: (key: string) => TxButtonState;
   canWrite: boolean;
   isOwner: boolean;
+  onCheckFunds: () => void;
   onAction: (taskId: bigint, action: "pauseTask" | "resumeTask" | "closeTask") => void;
 }
 
 function TaskTable(props: TaskTableProps) {
-  const { t, nowSeconds, tasks, taskTokens, modeOptions, outputOptions, buttonState, canWrite, isOwner, onAction } = props;
+  const { t, nowSeconds, tasks, taskTokens, modeOptions, outputOptions, buttonState, canWrite, isOwner, onCheckFunds, onAction } = props;
   return (
     <div className="overflow-x-auto rounded-[10px] border border-white/10">
       <div className="min-w-[960px]">
@@ -523,6 +536,7 @@ function TaskTable(props: TaskTableProps) {
           const key = id.toString();
           const active = task[13];
           const paused = task[14];
+          const waitingForFunds = active && !paused && task[10] === 0n && task[12] === 0n;
           const status = !active ? t("states.closed") : paused ? t("badges.paused") : task[10] > 0n ? t("states.scheduled") : t("states.needsFunding");
           const token = taskTokens[task[2].toLowerCase()] ?? { symbol: "TOKEN", decimals: 18 };
           const amount = task[3] === 0n ? formatTokenAmount(task[6], 18) + " " + t("labels.bnb") : task[3] === 1n ? formatPercentBps(task[6]) + " " + t("labels.availableBnb") : formatTokenAmount(task[6], token.decimals) + " " + token.symbol;
@@ -535,7 +549,7 @@ function TaskTable(props: TaskTableProps) {
               <div className="font-mono text-sm font-semibold text-white">{formatTokenAmount(task[8], 18)} <span className="text-xs text-[#9ba693]">{t("labels.bnb")}</span></div>
               <div className={"text-sm font-semibold " + (!active ? "text-[#9ba693]" : paused ? "text-[#F5C842]" : "text-[#D0FF00]")}>{status}</div>
               <div className="flex flex-wrap items-center gap-1.5">
-                {active ? <>{paused ? <TxButton idleLabel={t("buttons.resume")} state={buttonState("resumeTask:" + key)} onClick={() => onAction(id, "resumeTask")} disabled={!canWrite || !isOwner || task[12] > 0n} /> : <TxButton idleLabel={t("buttons.pause")} state={buttonState("pauseTask:" + key)} onClick={() => onAction(id, "pauseTask")} disabled={!canWrite || !isOwner} variant="secondary" />}<TxButton idleLabel={t("buttons.closeTask")} state={buttonState("closeTask:" + key)} onClick={() => onAction(id, "closeTask")} disabled={!canWrite || !isOwner} variant="secondary" /></> : null}
+                {active ? <>{waitingForFunds ? <TxButton idleLabel={t("buttons.checkFunds")} state={buttonState("sync-tasks")} onClick={onCheckFunds} disabled={!canWrite || !isOwner} /> : null}{paused ? <TxButton idleLabel={t("buttons.resume")} state={buttonState("resumeTask:" + key)} onClick={() => onAction(id, "resumeTask")} disabled={!canWrite || !isOwner || task[12] > 0n} /> : <TxButton idleLabel={t("buttons.pause")} state={buttonState("pauseTask:" + key)} onClick={() => onAction(id, "pauseTask")} disabled={!canWrite || !isOwner} variant="secondary" />}<TxButton idleLabel={t("buttons.closeTask")} state={buttonState("closeTask:" + key)} onClick={() => onAction(id, "closeTask")} disabled={!canWrite || !isOwner} variant="secondary" /></> : null}
               </div>
             </div>
           </div>;

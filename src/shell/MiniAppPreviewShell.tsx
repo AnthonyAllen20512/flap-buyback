@@ -252,7 +252,7 @@ export function MiniAppPreviewShell({ folderName, manifest, i18n, children }: Mi
       <div className="min-h-screen bg-background">
         <FlapNavbar manifest={manifest} />
         <MiniAppPreviewFrame>{children}</MiniAppPreviewFrame>
-        <ManifestPanel
+        {folderName === "flap-boost" ? null : <ManifestPanel
           manifest={manifest}
           folderName={folderName}
           placement="footer"
@@ -266,7 +266,7 @@ export function MiniAppPreviewShell({ folderName, manifest, i18n, children }: Mi
           runtimeSnapshot={runtimeSnapshot}
           hostRuntimeResult={hostRuntime}
           hostOverrideActive={hostOverrideActive}
-        />
+        />}
       </div>
     </VaultRuntimeProvider>
   );

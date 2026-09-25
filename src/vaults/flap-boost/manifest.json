@@ -1,0 +1,28 @@
+{
+  "artifactId": "vaultui_flap-boost_01KSDJFFVYW7P84Y3Q6G71ZNW5",
+  "name": "Flap Boost Mini App",
+  "displayTitle": {
+    "zh": "Flap Boost 回购助手",
+    "en": "Flap Boost"
+  },
+  "mode": "mini-app",
+  "match": {
+    "bindings": [
+      {
+        "chainId": 97,
+        "tokenAddresses": ["0x2865d202f0378df0f23c855a0b09b61721918888"],
+        "externalContracts": [
+          {
+      "address": "0xdf7C0c2A1a4DB999A86e9dfdAC1774cb3A90817b",
+            "label": "Flap Boost Multi-Task Factory (BSC Testnet)"
+          }
+        ]
+      },
+      {
+        "chainId": 56,
+        "tokenAddresses": ["0x9adc2f9dbc4578808f0cdb30d51b5199ff4b8888"]
+      }
+    ]
+  },
+  "i18n": ["en", "zh"]
+}

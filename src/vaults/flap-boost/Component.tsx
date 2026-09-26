@@ -336,15 +336,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     void loadToken(context.tokenAddress);
   }, [context.tokenAddress, loadToken, personalVaultAddress]);
 
-  async function loadProjectCa() {
-    if (!isValidAddress(context.tokenAddress)) {
-      setError(t("errors.targetToken"));
-      return;
-    }
-    setTokenAddressInput(context.tokenAddress);
-    await loadToken(context.tokenAddress);
-  }
-
   async function createTask() {
     if (!canWrite || !isOwner || config instanceof Error || !tokenPreview) {
       if (config instanceof Error) setError(config.message);
@@ -475,7 +466,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               <section className="rounded-[14px] border border-[#D0FF00]/30 bg-[#101400]/20 p-3 sm:p-4">
                 <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Settings2 className="h-4 w-4 text-[#D0FF00]" />{t("sections.targetToken")}</div>
                 <p className="mb-3 text-xs leading-5 text-[#9ba693]">{t("help.targetToken")}</p>
-                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]"><Input value={tokenAddressInput} onChange={(event) => { setTokenAddressInput(event.target.value); setTokenPreview(null); }} placeholder={t("placeholders.targetToken")} /><Button type="button" size="sm" variant="secondary" onClick={() => void loadToken()} disabled={tokenLookupLoading}>{tokenLookupLoading ? t("buttons.loading") : t("buttons.loadToken")}</Button><Button type="button" size="sm" variant="ghost" onClick={() => void loadProjectCa()}>{t("buttons.useProjectCa")}</Button>{isValidAddress(tokenAddressInput) ? <Button asChild type="button" size="sm" variant="outline"><a href={explorerAddressHref(tokenAddressInput)} target="_blank" rel="noreferrer">BscScan<ExternalLink className="h-3.5 w-3.5" /></a></Button> : null}</div>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><Input value={tokenAddressInput} onChange={(event) => { setTokenAddressInput(event.target.value); setTokenPreview(null); }} placeholder={t("placeholders.targetToken")} /><Button type="button" size="sm" variant="secondary" onClick={() => void loadToken()} disabled={tokenLookupLoading}>{tokenLookupLoading ? t("buttons.loading") : t("buttons.loadToken")}</Button>{isValidAddress(tokenAddressInput) ? <Button asChild type="button" size="sm" variant="outline"><a href={explorerAddressHref(tokenAddressInput)} target="_blank" rel="noreferrer">BscScan<ExternalLink className="h-3.5 w-3.5" /></a></Button> : null}</div>
                 {tokenPreview ? <div className="mt-3 grid gap-2 sm:grid-cols-3"><a href={explorerAddressHref(tokenPreview.address)} target="_blank" rel="noreferrer" className="rounded-[8px] border border-[#00E5D0]/45 bg-[#003B36]/35 p-3 transition-colors hover:border-[#00E5D0] hover:bg-[#003B36]/55"><div className="text-xs text-[#9ba693]">{t("labels.targetToken")}</div><div className="mt-1 font-semibold text-white">{tokenPreview.symbol}</div><div className="mt-1 inline-flex items-center gap-1 text-xs text-[#86f7ec]">{shortAddress(tokenPreview.address)}<ExternalLink className="h-3 w-3" /></div></a><DetailTile label={t("labels.walletTokenBalance")} value={formatTokenAmount(tokenPreview.walletBalance, tokenPreview.decimals)} detail={tokenPreview.symbol} /><DetailTile label={t("labels.vaultTokenBalance")} value={formatTokenAmount(tokenPreview.vaultBalance, tokenPreview.decimals)} detail={tokenPreview.symbol} tone="success" /></div> : null}
               </section>
 
@@ -535,8 +526,8 @@ function TaskTable(props: TaskTableProps) {
   const { t, nowSeconds, tasks, taskTokens, modeOptions, outputOptions, buttonState, canWrite, isOwner, onCheckFunds, onAction } = props;
   return (
     <div className="overflow-x-auto rounded-[10px] border border-white/10">
-      <div className="min-w-[960px]">
-        <div className="grid grid-cols-6 gap-2 border-b border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[#9ba693]"><span>{t("labels.taskNumber")}</span><span>{t("labels.buybackDetails", t("labels.rule"))}</span><span>{t("labels.nextRun")}</span><span>{t("labels.bnbConsumed", t("labels.bnbUsed"))}</span><span>{t("labels.taskStatus")}</span><span>{t("labels.actions")}</span></div>
+      <div className="min-w-[1060px]">
+        <div className="grid grid-cols-[0.7fr_1.45fr_1fr_0.8fr_0.8fr_1.45fr] gap-3 border-b border-white/10 bg-white/[0.03] px-3 py-2.5 text-xs font-semibold tracking-wide text-[#9ba693]"><span>{t("labels.taskNumber")}</span><span>{t("labels.buybackDetails", t("labels.rule"))}</span><span>{t("labels.nextRun")}</span><span>{t("labels.bnbConsumed", t("labels.bnbUsed"))}</span><span>{t("labels.taskStatus")}</span><span>{t("labels.actions")}</span></div>
         {tasks.length ? tasks.map(({ id, task }) => {
           const key = id.toString();
           const active = task[13];
@@ -547,14 +538,14 @@ function TaskTable(props: TaskTableProps) {
           const amount = task[3] === 0 ? formatTokenAmount(task[6], 18) + " " + t("labels.bnb") : task[3] === 1 ? formatPercentBps(task[6]) + " " + t("labels.availableBnb") : formatTokenAmount(task[6], token.decimals) + " " + token.symbol;
           const intervalMinutes = Math.max(1, Math.round(Number(task[5]) / 60));
           return <div key={key} className="border-b border-white/10 last:border-b-0">
-            <div className="grid grid-cols-6 items-center gap-2 px-3 py-3 text-xs">
-              <div className="font-semibold text-white">{"#" + key}<div className="mt-1 text-[#9ba693]">{task[9].toString() + " " + t("labels.rounds")}</div></div>
-              <div><div className="font-semibold text-white">{t("labels.buyback", t("labels.target"))} {token.symbol}</div><div className="mt-1 text-[#9ba693]">{modeOptions.find((option) => option.value === modeFromValue(task[3]))?.label ?? t("states.none")} · {amount} · {outputOptions.find((option) => option.value === outputFromValue(task[4]))?.label ?? t("states.none")}</div></div>
-              <div><div className="font-semibold text-white">{task[10] > 0n ? formatTime(task[11], nowSeconds, t("time.now"), t("time.unknown")) : t("states.notScheduled")}</div><div className="mt-1 text-[#9ba693]">{task[12] > 0n ? t("states.pendingDistribution") : intervalMinutes.toString() + " " + t("labels.minutes")}</div></div>
+            <div className="grid grid-cols-[0.7fr_1.45fr_1fr_0.8fr_0.8fr_1.45fr] items-center gap-3 px-3 py-3 text-[13px] leading-5">
+              <div className="font-semibold text-white">{"#" + key}<div className="mt-0.5 text-xs text-[#9ba693]">{task[9].toString() + " " + t("labels.rounds")}</div></div>
+              <div><div className="font-semibold text-white">{t("labels.buyback", t("labels.target"))} {token.symbol}</div><div className="mt-0.5 text-xs text-[#9ba693]">{modeOptions.find((option) => option.value === modeFromValue(task[3]))?.label ?? t("states.none")} · {amount} · {outputOptions.find((option) => option.value === outputFromValue(task[4]))?.label ?? t("states.none")}</div></div>
+              <div><div className="font-semibold text-white">{task[10] > 0n ? formatTime(task[11], nowSeconds, t("time.now"), t("time.unknown")) : t("states.notScheduled")}</div><div className="mt-0.5 text-xs text-[#9ba693]">{task[12] > 0n ? t("states.pendingDistribution") : intervalMinutes.toString() + " " + t("labels.minutes")}</div></div>
               <div className="font-mono text-sm font-semibold text-white">{formatTokenAmount(task[8], 18)} <span className="text-xs text-[#9ba693]">{t("labels.bnb")}</span></div>
               <div className={"text-sm font-semibold " + (!active ? "text-[#9ba693]" : paused ? "text-[#F5C842]" : "text-[#D0FF00]")}>{status}</div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {active ? <>{waitingForFunds ? <TxButton idleLabel={t("buttons.checkFunds")} state={buttonState("sync-tasks")} onClick={onCheckFunds} disabled={!canWrite || !isOwner} /> : null}{paused ? <TxButton idleLabel={t("buttons.resume")} state={buttonState("resumeTask:" + key)} onClick={() => onAction(id, "resumeTask")} disabled={!canWrite || !isOwner || task[12] > 0n} /> : <TxButton idleLabel={t("buttons.pause")} state={buttonState("pauseTask:" + key)} onClick={() => onAction(id, "pauseTask")} disabled={!canWrite || !isOwner} variant="secondary" />}<TxButton idleLabel={t("buttons.closeTask")} state={buttonState("closeTask:" + key)} onClick={() => onAction(id, "closeTask")} disabled={!canWrite || !isOwner} variant="secondary" /></> : null}
+              <div className="flex flex-wrap items-center gap-2">
+                {active ? <>{waitingForFunds ? <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.checkFunds")} state={buttonState("sync-tasks")} onClick={onCheckFunds} disabled={!canWrite || !isOwner} /> : null}{paused ? <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.resume")} state={buttonState("resumeTask:" + key)} onClick={() => onAction(id, "resumeTask")} disabled={!canWrite || !isOwner || task[12] > 0n} /> : <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.pause")} state={buttonState("pauseTask:" + key)} onClick={() => onAction(id, "pauseTask")} disabled={!canWrite || !isOwner} variant="secondary" />}<TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.closeTask")} state={buttonState("closeTask:" + key)} onClick={() => onAction(id, "closeTask")} disabled={!canWrite || !isOwner} variant="outline" /></> : null}
               </div>
             </div>
           </div>;

@@ -11,8 +11,8 @@ import { factoryAbi, vaultAbi } from "./VaultABI";
 const BOOST_FACTORY_TESTNET_ADDRESS = "0xdf7C0c2A1a4DB999A86e9dfdAC1774cb3A90817b" as Address;
 const DISPLAY_LIMIT = 25n;
 
-type TaskTuple = readonly [bigint, bigint, Address, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, boolean, boolean];
-type ExecutionTuple = readonly [bigint, bigint, bigint, bigint, bigint, bigint, boolean];
+type TaskTuple = readonly [bigint, bigint, Address, number, number, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, boolean, boolean];
+type ExecutionTuple = readonly [bigint, bigint, bigint, bigint, number, number, boolean];
 type TotalsTuple = readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint];
 type TokenPreviewTuple = readonly [string, number, bigint];
 type BuybackMode = "fixed-bnb" | "balance-ratio" | "fixed-token";
@@ -46,15 +46,22 @@ function asBigInt(value: unknown) {
   if (typeof value === "string" && value) return BigInt(value);
   return 0n;
 }
+function asNumber(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && value) return Number(value);
+  return 0;
+}
 function asAddress(value: unknown) {
   return typeof value === "string" && isValidAddress(value) ? value as Address : ZERO_ADDRESS;
 }
 /** viem exposes a Solidity single-struct return as a named object, while the table uses a compact tuple. */
 function normalizeTask(value: unknown): TaskTuple {
-  if (Array.isArray(value)) return value as unknown as TaskTuple;
-  const task = (value ?? {}) as Record<string, unknown>;
+  const task = Array.isArray(value)
+    ? { createdAt: value[0], closedAt: value[1], targetToken: value[2], mode: value[3], tokenOutput: value[4], interval: value[5], amount: value[6], bnbAvailable: value[7], bnbSpent: value[8], executions: value[9], triggerId: value[10], scheduledFor: value[11], pendingExecution: value[12], active: value[13], paused: value[14] }
+    : (value ?? {}) as Record<string, unknown>;
   return [
-    asBigInt(task.createdAt), asBigInt(task.closedAt), asAddress(task.targetToken), asBigInt(task.mode), asBigInt(task.tokenOutput),
+    asBigInt(task.createdAt), asBigInt(task.closedAt), asAddress(task.targetToken), asNumber(task.mode), asNumber(task.tokenOutput),
     asBigInt(task.interval), asBigInt(task.amount), asBigInt(task.bnbAvailable), asBigInt(task.bnbSpent), asBigInt(task.executions),
     asBigInt(task.triggerId), asBigInt(task.scheduledFor), asBigInt(task.pendingExecution), Boolean(task.active), Boolean(task.paused),
   ];
@@ -75,11 +82,11 @@ function formatTime(timestamp: bigint, nowSeconds: number, ready: string, unknow
   if (timestamp <= 0n) return unknown;
   return Number(timestamp) <= nowSeconds ? ready : new Date(Number(timestamp) * 1000).toLocaleString();
 }
-function modeFromValue(value: bigint): BuybackMode {
-  return value === 1n ? "balance-ratio" : value === 2n ? "fixed-token" : "fixed-bnb";
+function modeFromValue(value: number): BuybackMode {
+  return value === 1 ? "balance-ratio" : value === 2 ? "fixed-token" : "fixed-bnb";
 }
-function outputFromValue(value: bigint): OutputMode {
-  return value === 1n ? "retain" : value === 2n ? "distribute" : "burn";
+function outputFromValue(value: number): OutputMode {
+  return value === 1 ? "retain" : value === 2 ? "distribute" : "burn";
 }
 
 export default function FlapBoostMiniApp(_props: VaultComponentProps) {
@@ -235,9 +242,9 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       const aggregate = tokenTotalsByAddress.get(task[2].toLowerCase());
       if (!aggregate) continue;
       aggregate.bought += execution[3];
-      if (execution[5] === 0n) aggregate.burned += execution[3];
-      if (execution[5] === 1n) aggregate.retained += execution[3];
-      if (execution[5] === 2n && execution[6]) aggregate.distributed += execution[3];
+      if (execution[5] === 0) aggregate.burned += execution[3];
+      if (execution[5] === 1) aggregate.retained += execution[3];
+      if (execution[5] === 2 && execution[6]) aggregate.distributed += execution[3];
     }
     if (requestId === requestRef.current) setSnapshot({ owner, availableBNB, taskCount, activeTaskCount, totals, tasks, taskTokens, tokenTotals: Array.from(tokenTotalsByAddress.values()) });
   }, [personalVaultAddress, sdk, vaultAddress]);
@@ -447,12 +454,11 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           </div>
         </CardHeader>
         <CardContent className="space-y-3 p-4 pt-0 sm:space-y-4 sm:p-5 sm:pt-0">
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
             <Metric label={t("labels.activeTasks")} value={String(snapshot?.activeTaskCount ?? 0n)} hint={t("labels.tasks")} tone="primary" />
             <Metric label={t("labels.availableBnb")} value={formatTokenAmount(snapshot?.availableBNB, 18)} hint={t("labels.sharedBnb")} />
             <Metric label={t("labels.totalSpent")} value={formatTokenAmount(snapshot?.totals[0], 18)} hint={t("labels.bnb")} />
             <Metric label={t("labels.totalExecutions")} value={String(snapshot?.totals[6] ?? 0n)} hint={t("labels.rounds")} />
-            <Metric label={t("labels.holders")} value={String(snapshot?.totals[5] ?? 0n)} hint={t("outputs.distribute")} />
           </div>
           {wrongNetwork ? <Alert tone="warning">{t("states.wrongNetwork", undefined, { chain: sdk.wallet.requiredChainLabel })}</Alert> : null}
           {factoryUnavailable ? <Alert tone="warning">{t("states.factoryUnavailable")}</Alert> : null}
@@ -492,7 +498,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                 </div>
                 <p className="mb-3 text-xs leading-5 text-[#9ba693]">{t("help.taskTable")}</p>
                 {!isOwner ? <Alert tone="warning">{t("states.ownerOnly")}</Alert> : null}
-                <div className="mb-3 grid gap-2 sm:grid-cols-3"><DetailTile label={t("labels.totalExecutions")} value={String(snapshot?.totals[6] ?? 0n)} detail={t("labels.rounds")} /><DetailTile label={t("labels.bnbConsumed", t("labels.bnbUsed"))} value={formatTokenAmount(snapshot?.totals[0], 18)} detail={t("labels.bnb")} /><DetailTile label={t("labels.totalFees")} value={formatTokenAmount(snapshot?.totals[1], 18)} detail={t("labels.bnb")} /></div>
                 {!showCreateTask && !snapshot?.tasks.length ? <div className="mb-4 flex flex-col gap-3 rounded-[12px] border border-[#D0FF00]/25 bg-[#101400]/35 p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-white">{t("labels.noTaskFunding")}</p><p className="mt-1 text-xs leading-5 text-[#9ba693]">{t("help.noTaskFunding")}</p></div><Button type="button" size="sm" className="shrink-0" onClick={() => setShowCreateTask(true)} disabled={!canWrite || !isOwner}><Plus className="h-3.5 w-3.5" />{t("buttons.newTask")}</Button></div> : null}
                 {showCreateTask ? (
                   <div className="mb-4 rounded-[12px] border border-[#D0FF00]/25 bg-[#101400]/25 p-3">
@@ -502,10 +507,10 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   </div>
                 ) : null}
                 <TaskTable t={t} nowSeconds={nowSeconds} tasks={snapshot?.tasks ?? []} taskTokens={snapshot?.taskTokens ?? {}} modeOptions={modeOptions} outputOptions={outputOptions} buttonState={buttonState} canWrite={canWrite} isOwner={isOwner} onCheckFunds={() => void checkFundsAndSchedule()} onAction={(id, action) => void taskAction(id, action)} />
+                {snapshot?.tokenTotals.length ? <TokenResults t={t} totals={snapshot.tokenTotals} automationFees={snapshot.totals[1]} /> : null}
               </section>
             </>
           )}
-          {snapshot?.tokenTotals.length ? <section className="overflow-x-auto rounded-[10px] border border-white/10 bg-[#0B0D0E]"><div className="min-w-[780px]"><div className="grid grid-cols-5 gap-2 border-b border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[#9ba693]"><span>{t("labels.token")}</span><span>{t("labels.tokensBought")}</span><span>{t("labels.burned")}</span><span>{t("labels.retained")}</span><span>{t("labels.distributed")}</span></div>{snapshot.tokenTotals.map((token) => <div key={token.address} className="grid grid-cols-5 gap-2 border-b border-white/10 px-3 py-3 text-sm last:border-b-0"><div className="font-semibold text-white">{token.symbol}</div><div className="font-mono font-semibold text-white">{formatTokenAmount(token.bought, token.decimals)}</div><div className="font-mono font-semibold text-white">{formatTokenAmount(token.burned, token.decimals)}</div><div className="font-mono font-semibold text-white">{formatTokenAmount(token.retained, token.decimals)}</div><div className="font-mono font-semibold text-[#86f7ec]">{formatTokenAmount(token.distributed, token.decimals)}</div></div>)}</div></section> : null}
         </CardContent>
       </Card>
     </div>
@@ -539,7 +544,7 @@ function TaskTable(props: TaskTableProps) {
           const waitingForFunds = active && !paused && task[10] === 0n && task[12] === 0n;
           const status = !active ? t("states.closed") : paused ? t("badges.paused") : task[10] > 0n ? t("states.scheduled") : t("states.needsFunding");
           const token = taskTokens[task[2].toLowerCase()] ?? { symbol: "TOKEN", decimals: 18 };
-          const amount = task[3] === 0n ? formatTokenAmount(task[6], 18) + " " + t("labels.bnb") : task[3] === 1n ? formatPercentBps(task[6]) + " " + t("labels.availableBnb") : formatTokenAmount(task[6], token.decimals) + " " + token.symbol;
+          const amount = task[3] === 0 ? formatTokenAmount(task[6], 18) + " " + t("labels.bnb") : task[3] === 1 ? formatPercentBps(task[6]) + " " + t("labels.availableBnb") : formatTokenAmount(task[6], token.decimals) + " " + token.symbol;
           const intervalMinutes = Math.max(1, Math.round(Number(task[5]) / 60));
           return <div key={key} className="border-b border-white/10 last:border-b-0">
             <div className="grid grid-cols-6 items-center gap-2 px-3 py-3 text-xs">
@@ -557,6 +562,45 @@ function TaskTable(props: TaskTableProps) {
       </div>
     </div>
   );
+}
+
+interface TokenResultsProps {
+  t: (key: string, fallback?: string, params?: Record<string, string | number>) => string;
+  totals: TokenTotals[];
+  automationFees: bigint;
+}
+
+function TokenResults({ t, totals, automationFees }: TokenResultsProps) {
+  return (
+    <section className="mt-4 border-t border-white/10 pt-4">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-white"><Flame className="h-4 w-4 text-[#D0FF00]" />{t("sections.results")}</div>
+          <p className="mt-1 text-xs leading-5 text-[#9ba693]">{t("help.results")}</p>
+        </div>
+        <p className="text-xs text-[#9ba693]">{t("labels.totalFees")} <span className="font-mono font-semibold text-[#86f7ec]">{formatTokenAmount(automationFees, 18)} {t("labels.bnb")}</span></p>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        {totals.map((token) => (
+          <div key={token.address} className="overflow-hidden rounded-[10px] border border-white/10 bg-black/20">
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-3 py-2.5">
+              <div className="min-w-0"><div className="truncate font-semibold text-white">{token.symbol}</div><div className="mt-0.5 font-mono text-[11px] text-[#9ba693]">{t("labels.tokenCa")} {shortAddress(token.address)}</div></div>
+              <div className="shrink-0 text-right"><div className="text-[11px] text-[#9ba693]">{t("labels.tokensBought")}</div><div className="font-mono text-sm font-semibold text-white">{formatTokenAmount(token.bought, token.decimals)}</div></div>
+            </div>
+            <div className="grid grid-cols-3 divide-x divide-white/10">
+              <ResultValue label={t("labels.burned")} value={formatTokenAmount(token.burned, token.decimals)} />
+              <ResultValue label={t("labels.retained")} value={formatTokenAmount(token.retained, token.decimals)} />
+              <ResultValue label={t("labels.distributed")} value={formatTokenAmount(token.distributed, token.decimals)} accent />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ResultValue({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+  return <div className="min-w-0 px-3 py-2.5"><div className="text-[11px] text-[#9ba693]">{label}</div><div className={"mt-1 truncate font-mono text-sm font-semibold " + (accent ? "text-[#86f7ec]" : "text-white")}>{value}</div></div>;
 }
 
 interface TaskFormProps {

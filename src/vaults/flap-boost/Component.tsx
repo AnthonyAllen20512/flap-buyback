@@ -30,6 +30,7 @@ interface Snapshot {
   totals: TotalsTuple;
   tasks: TaskRecord[];
   taskTokens: Record<string, TaskTokenInfo>;
+  holdersAddedByTask: Record<string, number>;
   tokenTotals: TokenTotals[];
 }
 interface TokenPreview {
@@ -117,6 +118,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const [tokenLookupLoading, setTokenLookupLoading] = useState(false);
   const [bnbFundingAmount, setBnbFundingAmount] = useState("");
   const [bnbWithdrawAmount, setBnbWithdrawAmount] = useState("");
+  const [hiddenClosedTaskIds, setHiddenClosedTaskIds] = useState<string[]>([]);
   const requestRef = useRef(0);
   const autoLoadedTokenRef = useRef<string | null>(null);
 
@@ -230,6 +232,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       }
     }))) as Record<string, TaskTokenInfo>;
     const taskById = new Map(allTasks.map(({ id, task }) => [id.toString(), task]));
+    const holdersAddedByTask: Record<string, number> = {};
     const tokenTotalsByAddress = new Map<string, TokenTotals>(targetTokens.map((token) => {
       const info = taskTokens[token] ?? { symbol: "TOKEN", decimals: 18 };
       return [token, { address: token as Address, ...info, bought: 0n, burned: 0n, retained: 0n, distributed: 0n }];
@@ -244,9 +247,13 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       aggregate.bought += execution[3];
       if (execution[5] === 0) aggregate.burned += execution[3];
       if (execution[5] === 1) aggregate.retained += execution[3];
-      if (execution[5] === 2 && execution[6]) aggregate.distributed += execution[3];
+      if (execution[5] === 2 && execution[6]) {
+        aggregate.distributed += execution[3];
+        const taskId = execution[0].toString();
+        holdersAddedByTask[taskId] = (holdersAddedByTask[taskId] ?? 0) + execution[4];
+      }
     }
-    if (requestId === requestRef.current) setSnapshot({ owner, availableBNB, taskCount, activeTaskCount, totals, tasks, taskTokens, tokenTotals: Array.from(tokenTotalsByAddress.values()) });
+    if (requestId === requestRef.current) setSnapshot({ owner, availableBNB, taskCount, activeTaskCount, totals, tasks, taskTokens, holdersAddedByTask, tokenTotals: Array.from(tokenTotalsByAddress.values()) });
   }, [personalVaultAddress, sdk, vaultAddress]);
 
   useEffect(() => {
@@ -260,6 +267,20 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     autoLoadedTokenRef.current = null;
     setSnapshot(null);
     setTokenPreview(null);
+  }, [personalVaultAddress]);
+
+  useEffect(() => {
+    if (!personalVaultAddress) {
+      setHiddenClosedTaskIds([]);
+      return;
+    }
+    try {
+      const value = window.localStorage.getItem("flap-boost:hidden-closed-tasks:" + personalVaultAddress.toLowerCase());
+      const ids = value ? JSON.parse(value) : [];
+      setHiddenClosedTaskIds(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
+    } catch {
+      setHiddenClosedTaskIds([]);
+    }
   }, [personalVaultAddress]);
 
   useEffect(() => {
@@ -421,6 +442,26 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     }, message);
   }
 
+  const deleteClosedTaskFromList = useCallback((taskId: bigint) => {
+    if (!personalVaultAddress) return;
+    const id = taskId.toString();
+    const storageKey = "flap-boost:hidden-closed-tasks:" + personalVaultAddress.toLowerCase();
+    setHiddenClosedTaskIds((current) => {
+      const next = current.includes(id) ? current : [...current, id];
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        // Keeping the task hidden for this open session still improves the workspace.
+      }
+      return next;
+    });
+  }, [personalVaultAddress]);
+
+  const visibleTasks = useMemo(
+    () => (snapshot?.tasks ?? []).filter(({ id }) => !hiddenClosedTaskIds.includes(id.toString())),
+    [hiddenClosedTaskIds, snapshot?.tasks],
+  );
+
   const modeOptions = [
     { value: "fixed-bnb" as const, label: t("modes.fixedBnb") },
     { value: "balance-ratio" as const, label: t("modes.balanceRatio") },
@@ -497,7 +538,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     <div className="mt-3 border-t border-white/10 pt-3"><TxButton idleLabel={t("buttons.createTask")} state={buttonState("create-task")} onClick={() => void createTask()} disabled={!canWrite || !isOwner || config instanceof Error || !tokenPreview} /></div>
                   </div>
                 ) : null}
-                <TaskTable t={t} nowSeconds={nowSeconds} tasks={snapshot?.tasks ?? []} taskTokens={snapshot?.taskTokens ?? {}} modeOptions={modeOptions} outputOptions={outputOptions} buttonState={buttonState} canWrite={canWrite} isOwner={isOwner} onCheckFunds={() => void checkFundsAndSchedule()} onAction={(id, action) => void taskAction(id, action)} />
+                <TaskTable t={t} nowSeconds={nowSeconds} tasks={visibleTasks} taskTokens={snapshot?.taskTokens ?? {}} holdersAddedByTask={snapshot?.holdersAddedByTask ?? {}} modeOptions={modeOptions} outputOptions={outputOptions} buttonState={buttonState} canWrite={canWrite} isOwner={isOwner} onCheckFunds={() => void checkFundsAndSchedule()} onAction={(id, action) => void taskAction(id, action)} onDeleteClosed={(id) => deleteClosedTaskFromList(id)} />
                 {snapshot?.tokenTotals.length ? <TokenResults t={t} totals={snapshot.tokenTotals} automationFees={snapshot.totals[1]} /> : null}
               </section>
             </>
@@ -513,6 +554,7 @@ interface TaskTableProps {
   nowSeconds: number;
   tasks: TaskRecord[];
   taskTokens: Record<string, TaskTokenInfo>;
+  holdersAddedByTask: Record<string, number>;
   modeOptions: Array<{ value: BuybackMode; label: string }>;
   outputOptions: Array<{ value: OutputMode; label: string }>;
   buttonState: (key: string) => TxButtonState;
@@ -520,10 +562,11 @@ interface TaskTableProps {
   isOwner: boolean;
   onCheckFunds: () => void;
   onAction: (taskId: bigint, action: "pauseTask" | "resumeTask" | "closeTask") => void;
+  onDeleteClosed: (taskId: bigint) => void;
 }
 
 function TaskTable(props: TaskTableProps) {
-  const { t, nowSeconds, tasks, taskTokens, modeOptions, outputOptions, buttonState, canWrite, isOwner, onCheckFunds, onAction } = props;
+  const { t, nowSeconds, tasks, taskTokens, holdersAddedByTask, modeOptions, outputOptions, buttonState, canWrite, isOwner, onCheckFunds, onAction, onDeleteClosed } = props;
   return (
     <div className="overflow-x-auto rounded-[10px] border border-white/10">
       <div className="min-w-[1060px]">
@@ -537,15 +580,17 @@ function TaskTable(props: TaskTableProps) {
           const token = taskTokens[task[2].toLowerCase()] ?? { symbol: "TOKEN", decimals: 18 };
           const amount = task[3] === 0 ? formatTokenAmount(task[6], 18) + " " + t("labels.bnb") : task[3] === 1 ? formatPercentBps(task[6]) + " " + t("labels.availableBnb") : formatTokenAmount(task[6], token.decimals) + " " + token.symbol;
           const intervalMinutes = Math.max(1, Math.round(Number(task[5]) / 60));
+          const output = outputFromValue(task[4]);
+          const outputDetail = output === "distribute" ? t("labels.holdersAddedCount", undefined, { count: holdersAddedByTask[key] ?? 0 }) : outputOptions.find((option) => option.value === output)?.label ?? t("states.none");
           return <div key={key} className="border-b border-white/10 last:border-b-0">
             <div className="grid grid-cols-[0.7fr_1.45fr_1fr_0.8fr_0.8fr_1.45fr] items-center gap-3 px-3 py-3 text-[13px] leading-5">
               <div className="font-semibold text-white">{"#" + key}<div className="mt-0.5 text-xs text-[#9ba693]">{task[9].toString() + " " + t("labels.rounds")}</div></div>
-              <div><div className="font-semibold text-white">{t("labels.buyback", t("labels.target"))} {token.symbol}</div><div className="mt-0.5 text-xs text-[#9ba693]">{modeOptions.find((option) => option.value === modeFromValue(task[3]))?.label ?? t("states.none")} · {amount} · {outputOptions.find((option) => option.value === outputFromValue(task[4]))?.label ?? t("states.none")}</div></div>
+              <div><div className="font-semibold text-white">{t("labels.buyback", t("labels.target"))} {token.symbol}</div><div className="mt-0.5 text-xs text-[#9ba693]">{modeOptions.find((option) => option.value === modeFromValue(task[3]))?.label ?? t("states.none")} · {amount} · {outputDetail}</div></div>
               <div><div className="font-semibold text-white">{task[10] > 0n ? formatTime(task[11], nowSeconds, t("time.now"), t("time.unknown")) : t("states.notScheduled")}</div><div className="mt-0.5 text-xs text-[#9ba693]">{task[12] > 0n ? t("states.pendingDistribution") : intervalMinutes.toString() + " " + t("labels.minutes")}</div></div>
               <div className="font-mono text-sm font-semibold text-white">{formatTokenAmount(task[8], 18)} <span className="text-xs text-[#9ba693]">{t("labels.bnb")}</span></div>
               <div className={"text-sm font-semibold " + (!active ? "text-[#9ba693]" : paused ? "text-[#F5C842]" : "text-[#D0FF00]")}>{status}</div>
               <div className="flex flex-wrap items-center gap-2">
-                {active ? <>{waitingForFunds ? <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.checkFunds")} state={buttonState("sync-tasks")} onClick={onCheckFunds} disabled={!canWrite || !isOwner} /> : null}{paused ? <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.resume")} state={buttonState("resumeTask:" + key)} onClick={() => onAction(id, "resumeTask")} disabled={!canWrite || !isOwner || task[12] > 0n} /> : <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.pause")} state={buttonState("pauseTask:" + key)} onClick={() => onAction(id, "pauseTask")} disabled={!canWrite || !isOwner} variant="secondary" />}<TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.closeTask")} state={buttonState("closeTask:" + key)} onClick={() => onAction(id, "closeTask")} disabled={!canWrite || !isOwner} variant="outline" /></> : null}
+                {active ? <>{waitingForFunds ? <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.checkFunds")} state={buttonState("sync-tasks")} onClick={onCheckFunds} disabled={!canWrite || !isOwner} /> : null}{paused ? <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.resume")} state={buttonState("resumeTask:" + key)} onClick={() => onAction(id, "resumeTask")} disabled={!canWrite || !isOwner || task[12] > 0n} /> : <TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.pause")} state={buttonState("pauseTask:" + key)} onClick={() => onAction(id, "pauseTask")} disabled={!canWrite || !isOwner} variant="secondary" />}<TxButton size="sm" className="h-8 px-3 text-[13px]" idleLabel={t("buttons.closeTask")} state={buttonState("closeTask:" + key)} onClick={() => onAction(id, "closeTask")} disabled={!canWrite || !isOwner} variant="outline" /></> : <Button type="button" size="sm" className="h-8 px-3 text-[13px]" variant="destructive" onClick={() => onDeleteClosed(id)}>{t("buttons.deleteTask")}</Button>}
               </div>
             </div>
           </div>;

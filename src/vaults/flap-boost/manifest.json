@@ -13,7 +13,7 @@
         "tokenAddresses": ["0x2865d202f0378df0f23c855a0b09b61721918888"],
         "externalContracts": [
           {
-      "address": "0xdf7C0c2A1a4DB999A86e9dfdAC1774cb3A90817b",
+            "address": "0xdf7C0c2A1a4DB999A86e9dfdAC1774cb3A90817b",
             "label": "Flap Boost Multi-Task Factory (BSC Testnet)"
           }
         ]

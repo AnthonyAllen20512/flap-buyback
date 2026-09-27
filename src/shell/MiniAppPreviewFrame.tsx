@@ -24,7 +24,8 @@ export function MiniAppPreviewFrame({ children }: { children: ReactNode }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const tokenDetailHref = readExtraString(context.extraConfig, "tokenDetailHref") ?? "/";
-  const title = readDisplayTitle(context.manifest.displayTitle, languageCode) || context.manifest.name || lang.preview.miniAppTitle;
+  const title =
+    readDisplayTitle(context.manifest.displayTitle, languageCode) || context.manifest.name || lang.preview.miniAppTitle;
   const modeLabel = lang.preview.miniAppTitle;
   const tab = title;
   const fullscreenLabel = isFullscreen ? lang.preview.exitFullscreen : lang.preview.fullscreen;
@@ -81,8 +82,13 @@ export function MiniAppPreviewFrame({ children }: { children: ReactNode }) {
 
         <div className="mt-8 border-b border-[#484B51]">
           <div className="relative mx-auto h-[43px] w-full max-w-[1200px] px-3 md:px-6 xl:px-0">
-            <span className="absolute bottom-[11px] left-3 text-[14px] font-semibold leading-[1.4] text-white md:left-6 xl:left-0">{tab}</span>
-            <span aria-hidden="true" className="absolute bottom-0 left-3 h-[3px] w-[27px] bg-white md:left-6 xl:left-0" />
+            <span className="absolute bottom-[11px] left-3 text-[14px] font-semibold leading-[1.4] text-white md:left-6 xl:left-0">
+              {tab}
+            </span>
+            <span
+              aria-hidden="true"
+              className="absolute bottom-0 left-3 h-[3px] w-[27px] bg-white md:left-6 xl:left-0"
+            />
           </div>
         </div>
       </section>
@@ -100,11 +106,17 @@ export function MiniAppPreviewFrame({ children }: { children: ReactNode }) {
               aria-label={fullscreenLabel}
               title={fullscreenLabel}
             >
-              {isFullscreen ? <Minimize2 className="h-4 w-4" strokeWidth={1.8} /> : <Maximize2 className="h-4 w-4" strokeWidth={1.8} />}
+              {isFullscreen ? (
+                <Minimize2 className="h-4 w-4" strokeWidth={1.8} />
+              ) : (
+                <Maximize2 className="h-4 w-4" strokeWidth={1.8} />
+              )}
             </button>
 
             <div className="mini-app-artifact-content min-h-0 w-full min-w-0 overflow-auto">
-              <div data-vault-e2e-scope="vault-preview" className="h-full min-h-full w-full min-w-0">{children}</div>
+              <div data-vault-e2e-scope="vault-preview" className="h-full min-h-full w-full min-w-0">
+                {children}
+              </div>
             </div>
           </div>
         </div>

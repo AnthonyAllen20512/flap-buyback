@@ -82,7 +82,6 @@ interface Snapshot {
   taskTokens: Record<string, TaskTokenInfo>;
   holdersAddedByTask: Record<string, number>;
   tokenTotals: TokenTotals[];
-  automationStartQuote: AutomationStartQuoteTuple | null;
 }
 interface TokenPreview {
   address: Address;
@@ -311,7 +310,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       if (requestId === requestRef.current) setSnapshot(null);
       return;
     }
-    const [owner, availableBNB, taskCount, activeTaskCount, totals, automationStartQuote] = await Promise.all([
+    const [owner, availableBNB, taskCount, activeTaskCount, totals] = await Promise.all([
       sdk.readContract<Address>({ contract: "vault", address: vaultAddress, abi: vaultAbi, functionName: "planOwner" }),
       sdk.readContract<bigint>({
         contract: "vault",
@@ -332,14 +331,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         abi: vaultAbi,
         functionName: "getTotals",
       }),
-      sdk
-        .readContract<AutomationStartQuoteTuple>({
-          contract: "vault",
-          address: vaultAddress,
-          abi: vaultAbi,
-          functionName: "getAutomationStartQuote",
-        })
-        .catch(() => null),
     ]);
     const allTaskIds = Array.from({ length: Number(taskCount) }, (_, index) => BigInt(index + 1));
     const allTasks = await Promise.all(
@@ -421,7 +412,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         taskTokens,
         holdersAddedByTask,
         tokenTotals: Array.from(tokenTotalsByAddress.values()),
-        automationStartQuote,
       });
   }, [personalVaultAddress, sdk, vaultAddress]);
 
@@ -565,7 +555,14 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       else if (!tokenPreview) setError(t("errors.loadTokenFirst"));
       return;
     }
-    const automationStartQuote = snapshot?.automationStartQuote;
+    const automationStartQuote = await sdk
+      .readContract<AutomationStartQuoteTuple>({
+        contract: "vault",
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "getAutomationStartQuote",
+      })
+      .catch(() => null);
     if (!automationStartQuote || !automationStartQuote[3]) {
       setError(t("errors.automationQuoteUnavailable"));
       return;
@@ -969,19 +966,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                       modeOptions={modeOptions}
                       outputOptions={outputOptions}
                     />
-                    <AutomationStartQuotePanel t={t} quote={snapshot?.automationStartQuote ?? null} />
                     <div className="mt-3 border-t border-white/10 pt-3">
                       <TxButton
                         idleLabel={t("buttons.createTask")}
                         state={buttonState("create-task")}
                         onClick={() => void createTask()}
-                        disabled={
-                          !canWrite ||
-                          !isOwner ||
-                          config instanceof Error ||
-                          !tokenPreview ||
-                          !snapshot?.automationStartQuote?.[3]
-                        }
+                        disabled={!canWrite || !isOwner || config instanceof Error || !tokenPreview}
                       />
                     </div>
                   </div>
@@ -1238,42 +1228,6 @@ function ResultValue({ label, value, accent = false }: { label: string; value: s
       <div className={"mt-1 truncate font-mono text-sm font-semibold " + (accent ? "text-[#86f7ec]" : "text-white")}>
         {value}
       </div>
-    </div>
-  );
-}
-
-function AutomationStartQuotePanel({
-  t,
-  quote,
-}: {
-  t: (key: string, fallback?: string, params?: Record<string, string | number>) => string;
-  quote: AutomationStartQuoteTuple | null;
-}) {
-  if (!quote) return <Alert tone="warning">{t("states.contractUpgradeRequired")}</Alert>;
-  const [platformFee, triggerFee, estimatedTotal, triggerFeeAvailable] = quote;
-  return (
-    <div className="mt-3 rounded-[10px] border border-white/10 bg-black/20 p-3">
-      <div className="grid gap-2 sm:grid-cols-3">
-        <DetailTile
-          label={t("labels.platformStartFee")}
-          value={formatTokenAmount(platformFee, 18)}
-          detail={t("labels.bnb")}
-          tone="success"
-        />
-        <DetailTile
-          label={t("labels.triggerFeeEstimate")}
-          value={triggerFeeAvailable ? formatTokenAmount(triggerFee, 18) : t("states.none")}
-          detail={triggerFeeAvailable ? t("labels.bnb") : t("states.triggerFeeUnavailable")}
-          tone={triggerFeeAvailable ? "default" : "warning"}
-        />
-        <DetailTile
-          label={t("labels.startCostEstimate")}
-          value={triggerFeeAvailable ? formatTokenAmount(estimatedTotal, 18) : t("states.none")}
-          detail={triggerFeeAvailable ? t("labels.bnb") : t("states.triggerFeeUnavailable")}
-          tone={triggerFeeAvailable ? "success" : "warning"}
-        />
-      </div>
-      <p className="mt-2 text-xs leading-5 text-[#9ba693]">{t("help.startServiceFee")}</p>
     </div>
   );
 }

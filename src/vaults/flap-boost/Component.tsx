@@ -28,7 +28,7 @@ import type { TxButtonState } from "@/src/ui";
 import { ExternalLink, Flame, Plus, RefreshCw, Settings2, Users, Wallet, X } from "lucide-react";
 import { factoryAbi, vaultAbi } from "./VaultABI";
 
-const BOOST_FACTORY_TESTNET_ADDRESS = "0xdf7C0c2A1a4DB999A86e9dfdAC1774cb3A90817b" as Address;
+const BOOST_FACTORY_TESTNET_ADDRESS = "0x407D29223DeaBa20f78A5895b084D593166eAcC7" as Address;
 const DISPLAY_LIMIT = 25n;
 const FIXED_SLIPPAGE_BPS = 100;
 

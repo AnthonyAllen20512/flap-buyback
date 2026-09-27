@@ -88,22 +88,24 @@ export function MiniAppPreviewFrame({ children }: { children: ReactNode }) {
       </section>
 
       <section className="flex min-h-0 flex-1 px-3 py-5 md:px-5">
-        <div
-          ref={containerRef}
-          className="mini-app-artifact-shell relative flex min-h-[420px] w-full min-w-0 flex-1 overflow-hidden bg-[#1D1D1D]"
-        >
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center border border-[#484B51] bg-black/80 text-white transition-colors hover:border-[#D0FF00] hover:text-[#D0FF00] focus-visible:border-[#D0FF00] focus-visible:text-[#D0FF00] focus-visible:outline-none"
-            aria-label={fullscreenLabel}
-            title={fullscreenLabel}
+        <div className="mx-auto flex min-h-[420px] w-full max-w-[1280px]">
+          <div
+            ref={containerRef}
+            className="mini-app-artifact-shell relative flex min-h-[420px] w-full min-w-0 flex-1 overflow-hidden bg-[#1D1D1D]"
           >
-            {isFullscreen ? <Minimize2 className="h-4 w-4" strokeWidth={1.8} /> : <Maximize2 className="h-4 w-4" strokeWidth={1.8} />}
-          </button>
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center border border-[#484B51] bg-black/80 text-white transition-colors hover:border-[#D0FF00] hover:text-[#D0FF00] focus-visible:border-[#D0FF00] focus-visible:text-[#D0FF00] focus-visible:outline-none"
+              aria-label={fullscreenLabel}
+              title={fullscreenLabel}
+            >
+              {isFullscreen ? <Minimize2 className="h-4 w-4" strokeWidth={1.8} /> : <Maximize2 className="h-4 w-4" strokeWidth={1.8} />}
+            </button>
 
-          <div className="mini-app-artifact-content min-h-0 w-full min-w-0 overflow-auto">
-            <div data-vault-e2e-scope="vault-preview" className="h-full min-h-full w-full min-w-0">{children}</div>
+            <div className="mini-app-artifact-content min-h-0 w-full min-w-0 overflow-auto">
+              <div data-vault-e2e-scope="vault-preview" className="h-full min-h-full w-full min-w-0">{children}</div>
+            </div>
           </div>
         </div>
       </section>

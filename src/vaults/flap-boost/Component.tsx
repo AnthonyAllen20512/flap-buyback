@@ -30,6 +30,7 @@ import { factoryAbi, vaultAbi } from "./VaultABI";
 
 const BOOST_FACTORY_TESTNET_ADDRESS = "0xdf7C0c2A1a4DB999A86e9dfdAC1774cb3A90817b" as Address;
 const DISPLAY_LIMIT = 25n;
+const FIXED_SLIPPAGE_BPS = 100;
 
 type TaskTuple = readonly [
   bigint,
@@ -184,7 +185,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const [buybackMode, setBuybackMode] = useState<BuybackMode>("fixed-bnb");
   const [modeAmount, setModeAmount] = useState("0.1");
   const [intervalMinutes, setIntervalMinutes] = useState("60");
-  const [slippage, setSlippage] = useState("1");
   const [outputMode, setOutputMode] = useState<OutputMode>("burn");
   const [retainRecipient, setRetainRecipient] = useState("");
   const [distributionMode, setDistributionMode] = useState<DistributionMode>("random");
@@ -213,10 +213,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const config = useMemo(() => {
     try {
       const interval = Number(intervalMinutes);
-      const slippageBps = decimalToBps(slippage);
       if (!isValidAddress(tokenAddressInput)) throw new Error(t("errors.targetToken"));
       if (!Number.isInteger(interval) || interval < 1) throw new Error(t("errors.interval"));
-      if (slippageBps === null || slippageBps > 5000) throw new Error(t("errors.slippage"));
       let amount: bigint;
       let buybackModeValue = 0;
       if (buybackMode === "balance-ratio") {
@@ -265,7 +263,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         buybackMode: buybackModeValue,
         amountPerRound: amount,
         intervalSeconds: BigInt(interval * 60),
-        maxSlippageBps: slippageBps,
+        maxSlippageBps: FIXED_SLIPPAGE_BPS,
         outputMode: outputModeValue,
         retainRecipient: recipient,
         distributionMode: distributionModeValue,
@@ -285,7 +283,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     outputMode,
     randomHolders,
     retainRecipient,
-    slippage,
     t,
     tokenAddressInput,
     tokenDecimals,
@@ -980,8 +977,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                       setModeAmount={setModeAmount}
                       intervalMinutes={intervalMinutes}
                       setIntervalMinutes={setIntervalMinutes}
-                      slippage={slippage}
-                      setSlippage={setSlippage}
                       outputMode={outputMode}
                       setOutputMode={setOutputMode}
                       retainRecipient={retainRecipient}
@@ -1327,8 +1322,6 @@ interface TaskFormProps {
   setModeAmount: (value: string) => void;
   intervalMinutes: string;
   setIntervalMinutes: (value: string) => void;
-  slippage: string;
-  setSlippage: (value: string) => void;
   outputMode: OutputMode;
   setOutputMode: (value: OutputMode) => void;
   retainRecipient: string;
@@ -1353,8 +1346,6 @@ function TaskForm(props: TaskFormProps) {
     setModeAmount,
     intervalMinutes,
     setIntervalMinutes,
-    slippage,
-    setSlippage,
     outputMode,
     setOutputMode,
     retainRecipient,
@@ -1401,7 +1392,7 @@ function TaskForm(props: TaskFormProps) {
           </Button>
         ))}
       </div>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field
           label={amountLabel}
           value={modeAmount}
@@ -1415,14 +1406,8 @@ function TaskForm(props: TaskFormProps) {
           onChange={setIntervalMinutes}
           placeholder={t("placeholders.interval")}
         />
-        <Field
-          label={t("labels.slippage")}
-          value={slippage}
-          onChange={setSlippage}
-          placeholder={t("placeholders.slippage")}
-          decimal
-        />
       </div>
+      <p className="text-sm font-medium text-[#D0FF00]">{t("help.fixedSlippage")}</p>
       <div className="space-y-2 border-t border-white/10 pt-3">
         <label className="text-xs font-semibold uppercase text-[#9ba693]">{t("labels.output")}</label>
         <div className="grid gap-2 sm:grid-cols-3">

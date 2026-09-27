@@ -654,27 +654,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     );
   }
 
-  async function checkFundsAndSchedule() {
-    if (!canWrite || !isOwner) return;
-    await runAction(
-      "sync-tasks",
-      async () => {
-        setTxState("simulating");
-        const simulation = await sdk.simulateContract({
-          contract: "vault",
-          address: vaultAddress,
-          abi: vaultAbi,
-          functionName: "sync",
-        });
-        setTxState("writing");
-        const hash = await sdk.writeContract(simulation.request);
-        setTxState("confirming");
-        await sdk.waitForTx(hash);
-      },
-      t("messages.tasksChecked"),
-    );
-  }
-
   async function taskAction(taskId: bigint, action: "pauseTask" | "resumeTask" | "closeTask") {
     if (!canWrite || !isOwner) return;
     const key = action + ":" + taskId.toString();
@@ -1018,7 +997,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   buttonState={buttonState}
                   canWrite={canWrite}
                   isOwner={isOwner}
-                  onCheckFunds={() => void checkFundsAndSchedule()}
                   onAction={(id, action) => void taskAction(id, action)}
                   onDeleteClosed={(id) => deleteClosedTaskFromList(id)}
                 />
@@ -1045,7 +1023,6 @@ interface TaskTableProps {
   buttonState: (key: string) => TxButtonState;
   canWrite: boolean;
   isOwner: boolean;
-  onCheckFunds: () => void;
   onAction: (taskId: bigint, action: "pauseTask" | "resumeTask" | "closeTask") => void;
   onDeleteClosed: (taskId: bigint) => void;
 }
@@ -1062,7 +1039,6 @@ function TaskTable(props: TaskTableProps) {
     buttonState,
     canWrite,
     isOwner,
-    onCheckFunds,
     onAction,
     onDeleteClosed,
   } = props;
@@ -1082,7 +1058,6 @@ function TaskTable(props: TaskTableProps) {
             const key = id.toString();
             const active = task[13];
             const paused = task[14];
-            const waitingForFunds = active && !paused && task[10] === 0n && task[12] === 0n;
             const status = !active
               ? t("states.closed")
               : paused
@@ -1145,16 +1120,6 @@ function TaskTable(props: TaskTableProps) {
                   <div className="flex flex-wrap items-center gap-2">
                     {active ? (
                       <>
-                        {waitingForFunds ? (
-                          <TxButton
-                            size="sm"
-                            className="h-8 px-3 text-[13px]"
-                            idleLabel={t("buttons.checkFunds")}
-                            state={buttonState("sync-tasks")}
-                            onClick={onCheckFunds}
-                            disabled={!canWrite || !isOwner}
-                          />
-                        ) : null}
                         {paused ? (
                           <TxButton
                             size="sm"

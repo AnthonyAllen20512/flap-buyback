@@ -952,20 +952,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
             </div>
           </section>
 
-          {selectedTask ? (
-            <section className="rounded-2xl border border-[#2C494E] bg-[#0D171B] p-4 sm:p-5">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-base font-semibold text-[#EFFAF8]">{t("sections.currentTask")}</h2>
-                <StatusBadge muted={selectedTask.paused || !selectedTask.active}>{selectedTask.paused ? t("badges.paused") : selectedTask.active ? t("badges.active") : t("states.closed")}</StatusBadge>
-              </div>
-              <div className="grid gap-3 text-sm sm:grid-cols-3">
-                <p className="text-[#A4C2BF]">{t("labels.targetToken")}: <span className="font-semibold text-[#F0FAF9]">{selectedTask.token.symbol}</span></p>
-                <p className="text-[#A4C2BF]">{t("labels.roundRule")}: <span className="font-semibold text-[#F0FAF9]">{taskRuleDetail(t, selectedTask)}</span></p>
-                <p className="text-[#A4C2BF]">{t("labels.output")}: <span className="font-semibold text-[#F0FAF9]">{outputRuleLabel(t, selectedTask.outputMode)}</span></p>
-              </div>
-            </section>
-          ) : null}
-
           <section className="flap-boost-workspace relative overflow-hidden rounded-2xl border border-[#263C43] bg-[#0B1014] shadow-[inset_0_1px_0_rgba(190,246,241,0.035)]">
             <div className="flex flex-col gap-3 border-b border-[#263C43] bg-[#0E171C] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex items-center gap-2.5 text-base font-semibold text-[#F0FAF9]">

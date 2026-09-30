@@ -1771,15 +1771,6 @@ function TaskList({
     <div className="grid gap-3">
       {tasks.map((task) => {
         const selected = taskKey(task) === selectedTaskAddress;
-        const output = outputFromValue(task.outputMode);
-        const outputDetail =
-          output === "distribute"
-            ? distributionFromValue(task.outputMode) === "random"
-              ? t("labels.randomHoldersPerRound", undefined, { count: task.randomRecipientCount })
-              : t("labels.recipientCount", undefined, { count: task.recipients.length })
-            : output === "retain"
-              ? t("labels.retainWallet")
-              : t("outputs.burn");
         const status = !task.active
           ? t("states.closed")
           : task.paused
@@ -1801,38 +1792,27 @@ function TaskList({
             }
             onClick={() => onSelect(taskKey(task))}
           >
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1.3fr)_0.8fr_auto] sm:items-center">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
               <div className="min-w-0">
-                <span className="font-semibold text-[#F0FAF9]">
-                  {outputRuleLabel(t, task.outputMode)} · {task.token.symbol}
-                </span>
-                <p className="mt-1 font-mono text-xs text-[#8FA9AA]">{shortAddress(task.address)} · #{task.operationId + 1} · {t("labels.selectToManage")}</p>
-              </div>
-              <div className="border-l border-[#29434A] pl-3 text-sm text-[#C7D9D8] sm:pl-4">
-                <span className="text-xs text-[#87A2A3]">{t("labels.totalSpent")}</span>
-                <p className="mt-1 font-mono font-semibold text-[#F0CB9D]">{formatTokenAmount(task.totalBNBSpent, 18)} BNB</p>
-              </div>
-              <div className="flex sm:justify-end">
-                <StatusBadge muted={!task.active || task.paused}>{status}</StatusBadge>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 border-t border-[#29434A] pt-3 sm:grid-cols-3">
-              <div className="min-w-0">
-                <span className="text-xs text-[#87A2A3]">{t("labels.roundRule")}</span>
-                <p className="mt-1 text-sm font-semibold text-[#E9F6F5]">{buyModeLabel(t, task.buyMode)}</p>
-                <p className="mt-1 truncate font-mono text-xs text-[#A8C0C0]">{taskRuleDetail(t, task)}</p>
-              </div>
-              <div className="border-l border-[#29434A] pl-3 sm:pl-4">
-                <span className="text-xs text-[#87A2A3]">{t("labels.interval")}</span>
-                <p className="mt-1 text-sm font-semibold text-[#E9F6F5]">
-                  {formatTokenAmount(task.interval / 60n, 0)} {t("labels.minutes")}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-lg font-semibold">
+                  <span className="text-[#F4FAF9]">{task.token.symbol}</span>
+                  <span className="text-[#F0CB9D]">· {outputRuleLabel(t, task.outputMode)}</span>
+                  <span className="font-mono text-xs font-medium text-[#78999B]">#{task.operationId + 1}</span>
+                </div>
+                <p className="mt-2 text-base text-[#B9CFCD]">
+                  <span className="text-[#829E9F]">{t("labels.roundRule")} </span>
+                  <span className="font-mono font-semibold text-[#F1FBF9]">{taskRuleDetail(t, task)}</span>
+                  <span className="mx-2.5 text-[#5F7779]">·</span>
+                  <span className="text-[#829E9F]">{t("labels.interval")} </span>
+                  <span className="font-semibold text-[#F1FBF9]">{formatTokenAmount(task.interval / 60n, 0)} {t("labels.minutes")}</span>
                 </p>
               </div>
-              <div className="border-l border-[#29434A] pl-3 sm:pl-4">
-                <span className="text-xs text-[#87A2A3]">{t("labels.output")}</span>
-                <p className="mt-1 text-sm font-semibold text-[#E9F6F5]">{outputRuleLabel(t, task.outputMode)}</p>
-                <p className="mt-1 text-xs text-[#A8C0C0]">{outputDetail}</p>
+              <div className="flex items-center justify-between gap-4 border-t border-[#29434A] pt-3 sm:justify-end sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+                <div className="text-left sm:text-right">
+                  <span className="text-xs text-[#87A2A3]">{t("labels.totalSpent")}</span>
+                  <p className="mt-1 font-mono text-lg font-semibold text-[#F4CE82]">{formatTokenAmount(task.totalBNBSpent, 18)} BNB</p>
+                </div>
+                <StatusBadge muted={!task.active || task.paused}>{status}</StatusBadge>
               </div>
             </div>
           </button>

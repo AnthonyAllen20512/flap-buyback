@@ -933,7 +933,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           {!actionsAvailable ? <Alert tone="warning">{t("states.actionsUnavailable")}</Alert> : null}
           {error ? <ErrorDialog t={t} message={error} onDismiss={() => setError(null)} /> : null}
 
-          <section className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(19rem,0.8fr)]">
+          <section>
             <div className="flap-boost-panel relative overflow-hidden rounded-2xl border border-[#2C494E] bg-[#0D171B] p-4 sm:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-[#EFFAF8]">{t("sections.vaultOverview")}</h2>
@@ -949,20 +949,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                 {taskReadState === "disconnected" ? t("states.connectWalletToRead") : taskReadState === "loading" ? t("states.loadingTasks") : taskReadState === "error" ? t("states.taskReadFailed") : tasks.length === 0 ? t("states.noTasksAtFactory") : t("labels.recentTasks")}
                 {factoryAddress ? ` · ${t("labels.factoryAddress")}: ${shortAddress(factoryAddress)}` : ""}
               </p>
-            </div>
-            <div className="flap-boost-panel flap-boost-engine relative overflow-hidden rounded-2xl border border-[#2C494E] bg-[linear-gradient(135deg,#102327,#0D151A_62%,#17130F)] p-4 sm:p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-[#EFFAF8]">{t("sections.engine")}</h2>
-                <Gauge className="h-5 w-5 text-[#75DAD3]" />
-              </div>
-              <div className="flap-boost-engine-core relative flex items-center gap-3 overflow-hidden rounded-xl border border-[#34575A] bg-[#0A171B] p-4">
-                <span className="flap-boost-idle-pulse flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#5CC9C3] bg-[#123338] text-[#8BE5DF]"><RefreshCw className="h-5 w-5" /></span>
-                <div className="min-w-0">
-                  <p className="font-semibold text-[#EFFAF8]">{selectedTask ? (selectedTask.paused ? t("badges.paused") : selectedTask.triggerId ? t("states.scheduled") : selectedTask.active ? t("states.standby") : t("states.closed")) : t("labels.waitingTask")}</p>
-                  <p className="mt-1 text-xs leading-5 text-[#9DB8B6]">{selectedTask ? `${selectedTask.token.symbol} · ${buyModeLabel(t, selectedTask.buyMode)} · ${taskRuleDetail(t, selectedTask)}` : t("labels.engineScanning")}</p>
-                </div>
-              </div>
-              {selectedTask ? <p className="mt-3 text-xs text-[#A9C6C3]">{t("labels.triggerId")}: {selectedTask.triggerId ? selectedTask.triggerId.toString() : "—"} · {t("labels.failedRetries")}: {selectedTask.consecutiveFailures}</p> : null}
             </div>
           </section>
 

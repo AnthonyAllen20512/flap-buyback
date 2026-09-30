@@ -1801,18 +1801,12 @@ function TaskList({
             }
             onClick={() => onSelect(taskKey(task))}
           >
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1.3fr)_0.8fr_0.8fr_auto] sm:items-center">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1.3fr)_0.8fr_auto] sm:items-center">
               <div className="min-w-0">
                 <span className="font-semibold text-[#F0FAF9]">
                   {outputRuleLabel(t, task.outputMode)} · {task.token.symbol}
                 </span>
                 <p className="mt-1 font-mono text-xs text-[#8FA9AA]">{shortAddress(task.address)} · #{task.operationId + 1} · {t("labels.selectToManage")}</p>
-              </div>
-              <div className="border-l border-[#29434A] pl-3 text-sm text-[#C7D9D8] sm:pl-4">
-                <span className="text-xs text-[#87A2A3]">{t("labels.totalBnb")}</span>
-                <p className="mt-1 font-mono font-semibold text-[#D7F5F2]">
-                  {formatTokenAmount(taskTotalBNB(task), 18)} BNB
-                </p>
               </div>
               <div className="border-l border-[#29434A] pl-3 text-sm text-[#C7D9D8] sm:pl-4">
                 <span className="text-xs text-[#87A2A3]">{t("labels.totalSpent")}</span>
@@ -1873,11 +1867,6 @@ function TaskOverview({
           ? `${t("labels.randomHoldersPerRound", undefined, { count: task.randomRecipientCount })} · ${t("labels.randomHoldersTotal", undefined, { count: task.totalRandomHolders.toString() })}`
           : t("labels.recipientCount", undefined, { count: task.recipients.length })
         : t("outputs.burn");
-  const healthDetail = task.callbackInProgress
-    ? t("states.callbackRunning")
-    : task.consecutiveFailures
-      ? `${task.consecutiveFailures} ${t("labels.failedRetries")}`
-      : t("states.healthy");
   return (
     <details open className="group overflow-hidden rounded-2xl border border-[#263C43] bg-[#0B1014] shadow-[inset_0_1px_0_rgba(190,246,241,0.035)]">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-4 sm:px-5">
@@ -1892,8 +1881,7 @@ function TaskOverview({
         </div>
         <ChevronRight className="h-4 w-4 shrink-0 text-[#86DED8] transition group-open:rotate-90" />
       </summary>
-      <div className="grid gap-3 border-t border-[#263C43] p-3 sm:grid-cols-2 sm:p-4 xl:grid-cols-3">
-        <InfoTile label={t("labels.targetToken")} value={task.token.symbol} detail={shortAddress(task.token.address)} />
+      <div className="grid gap-3 border-t border-[#263C43] p-3 sm:grid-cols-2 sm:p-4">
         <InfoTile
           label={t("labels.buybackMode")}
           value={buyModeLabel(t, task.buyMode)}
@@ -1913,11 +1901,6 @@ function TaskOverview({
           label={t("labels.totalTokensOut")}
           value={formatTokenAmount(task.totalTokensOutput, task.token.decimals)}
           detail={t("labels.onchainResult")}
-        />
-        <InfoTile
-          label={t("labels.executionHealth")}
-          value={healthDetail}
-          detail={task.triggerId ? `${t("labels.triggerId")} #${task.triggerId.toString()}` : t("states.callbackIdle")}
         />
       </div>
       {isOwner && task.active ? (
@@ -2237,7 +2220,7 @@ function TaskFunding({
         </div>
         <StatusBadge muted={!task.active || task.paused}>{status}</StatusBadge>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3">
         <Metric
           label={t("labels.totalBnb")}
           value={formatTokenAmount(taskTotalBNB(task), 18)}
@@ -2247,12 +2230,6 @@ function TaskFunding({
         <Metric
           label={t("labels.availableBnb")}
           value={formatTokenAmount(task.availableBNB, 18)}
-          hint="BNB"
-          className="rounded-lg border-[#29474D] bg-[#091217] px-3.5 py-3.5"
-        />
-        <Metric
-          label={t("labels.reservedBnb")}
-          value={formatTokenAmount(task.reservedBNB, 18)}
           hint="BNB"
           className="rounded-lg border-[#29474D] bg-[#091217] px-3.5 py-3.5"
         />

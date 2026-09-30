@@ -10,11 +10,12 @@
     "bindings": [
       {
         "chainId": 97,
+        "factoryAddress": "0xcf02a7704196FaDF835A74e34dE0Deef4986612D",
         "tokenAddresses": ["0x2865d202f0378df0f23c855a0b09b61721918888"],
         "externalContracts": [
           {
-            "address": "0xdf7C0c2A1a4DB999A86e9dfdAC1774cb3A90817b",
-            "label": "Flap Boost Multi-Task Factory (BSC Testnet)"
+            "address": "0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9",
+            "label": "Flap Portal"
           }
         ]
       },

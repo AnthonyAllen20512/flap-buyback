@@ -318,6 +318,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [txState, setTxState] = useState<TxButtonState>("idle");
   const [showCreateTask, setShowCreateTask] = useState(false);
+  const [showOperationPicker, setShowOperationPicker] = useState(false);
   const [tokenAddressInput, setTokenAddressInput] = useState<string>(context.tokenAddress);
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [minTokensPerBNB, setMinTokensPerBNB] = useState<bigint | null>(null);
@@ -371,8 +372,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     (task) => activeTokenAddress && task.token.address.toLowerCase() === activeTokenAddress.toLowerCase(),
   );
   const selectedTask = tokenTasks.find((task) => taskKey(task) === selectedTaskAddress) ?? tokenTasks[0] ?? null;
-  const activeToken = tokenTasks[0]?.token ??
-    (tokenInfo && activeTokenAddress?.toLowerCase() === tokenInfo.address.toLowerCase() ? tokenInfo : null);
   const selectedTaskIsOwner = Boolean(
     selectedTask && context.userAddress && selectedTask.owner.toLowerCase() === context.userAddress.toLowerCase(),
   );
@@ -383,6 +382,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   function beginCreateTask(mode: OutputMode) {
     setOutputMode(mode);
     setDistributionMode("fixed");
+    setShowOperationPicker(false);
     setShowCreateTask(true);
     setRetainRecipient("");
     setRecipientsText("");
@@ -394,6 +394,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     const first = tasks.find((task) => task.token.address.toLowerCase() === address.toLowerCase());
     setSelectedTaskAddress(first ? taskKey(first) : null);
     setShowCreateTask(false);
+    setShowOperationPicker(false);
     setFundingAmount("");
     setWithdrawAmount("");
   }
@@ -408,6 +409,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     setSelectedTokenAddress("");
     setSelectedTaskAddress(null);
     setShowCreateTask(true);
+    setShowOperationPicker(false);
     setOutputMode("burn");
     setDistributionMode("fixed");
     setRetainRecipient("");
@@ -889,12 +891,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       <BoostMotionStyles />
       <OnchainProgressOverlay t={t} state={txState} visible={activeAction !== null} />
       <div aria-hidden="true" className="flap-boost-aurora pointer-events-none absolute -inset-x-24 -top-36 -z-20 h-[48rem]" />
-      <div aria-hidden="true" className="flap-boost-grid pointer-events-none absolute inset-x-0 top-0 -z-10 h-[48rem] opacity-50" />
-      <div aria-hidden="true" className="flap-boost-orb flap-boost-orb-one pointer-events-none absolute -left-28 top-24 -z-10 h-60 w-60 rounded-full" />
-      <div aria-hidden="true" className="flap-boost-orb flap-boost-orb-two pointer-events-none absolute right-0 top-48 -z-10 h-72 w-72 rounded-full" />
-      <div aria-hidden="true" className="flap-boost-particle flap-boost-particle-one pointer-events-none absolute left-[12%] top-20 -z-10 h-1.5 w-1.5 rounded-full" />
-      <div aria-hidden="true" className="flap-boost-particle flap-boost-particle-two pointer-events-none absolute right-[18%] top-64 -z-10 h-1 w-1 rounded-full" />
-      <div aria-hidden="true" className="flap-boost-particle flap-boost-particle-three pointer-events-none absolute left-[48%] top-96 -z-10 h-1 w-1 rounded-full" />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[34rem] bg-[radial-gradient(ellipse_at_12%_0%,rgba(65,170,174,0.2),transparent_38%),radial-gradient(ellipse_at_86%_9%,rgba(219,159,94,0.14),transparent_32%)]"
@@ -971,6 +967,22 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   <RefreshCw className="h-3.5 w-3.5" />
                   {t("buttons.refresh")}
                 </Button>
+                {activeTokenAddress ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className={GOLD_SECONDARY_BUTTON + " h-10 flex-1 rounded-lg px-4 text-xs sm:flex-none"}
+                    onClick={() => {
+                      setShowCreateTask(false);
+                      setShowOperationPicker((value) => !value);
+                    }}
+                    disabled={!canWrite}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {t("buttons.addOperation")}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"
@@ -984,7 +996,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               </div>
             </div>
             <div className="space-y-4 px-4 pb-4 pt-4 sm:px-5">
-              <p className="text-sm leading-6 text-[#9FB6B6]">{t("help.tokenWorkspace")}</p>
               {ownedTokens.length ? (
                 <div className="flex flex-wrap gap-2" role="group" aria-label={t("labels.selectToken")}>
                   {ownedTokens.map((token) => {
@@ -1007,24 +1018,14 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   })}
                 </div>
               ) : null}
-              {activeTokenAddress ? (
-                <div className="flap-boost-token-card relative overflow-hidden rounded-xl border border-[#31565B] bg-[#0D1D22] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs text-[#8CAAA8]">{t("labels.currentToken")}</p>
-                      <h3 className="mt-1 text-lg font-semibold text-[#EFFAF8]">{activeToken?.symbol ?? shortAddress(activeTokenAddress as Address)}</h3>
-                      <p className="mt-1 break-all font-mono text-xs text-[#91B0AF]">{activeTokenAddress}</p>
-                    </div>
-                    <div className="text-left text-xs text-[#A9C4C2] sm:text-right">
-                      <p>{taskReadState === "ready" ? t("labels.operationCount", undefined, { count: tokenTasks.length }) : t("labels.onchainReading")}</p>
-                    </div>
+              {activeTokenAddress && showOperationPicker ? (
+                <div className="rounded-xl border border-[#6A551C] bg-[linear-gradient(145deg,#171306,#0D0C08)] p-3.5 shadow-[inset_0_1px_0_rgba(255,224,130,0.06)]">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-[#F5DF9B]">{t("sections.addOperation")}</p>
+                    <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => setShowOperationPicker(false)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
-                  <p className="mt-3 border-t border-[#29464A] pt-3 text-xs leading-5 text-[#96B5B2]">{t("help.separateOperationFunds")}</p>
-                </div>
-              ) : null}
-              {activeTokenAddress ? (
-                <div>
-                  <p className="mb-2 text-sm font-semibold text-[#EAF8F6]">{t("sections.addOperation")}</p>
                   <div className="grid gap-2 sm:grid-cols-3">
                     {(["burn", "distribute", "retain"] as const).map((mode) => (
                       <button
@@ -1057,7 +1058,10 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                       <p className="mt-0.5 text-xs font-normal text-[#9AB6B5]">{activeTokenAddress ? t("help.existingTokenCreate") : t("workflow.createDetail")}</p>
                     </div>
                   </div>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setShowCreateTask(false)}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => {
+                    setShowCreateTask(false);
+                    setShowOperationPicker(false);
+                  }}>
                     <X className="h-4 w-4" />{t("buttons.cancel")}
                   </Button>
                 </div>
@@ -1171,22 +1175,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
 function BoostMotionStyles() {
   return (
     <style>{`
-      @keyframes flapBoostAurora {
-        0%, 100% { opacity: 0.42; transform: scale(1) translate3d(0, 0, 0); }
-        50% { opacity: 0.84; transform: scale(1.08) translate3d(1.5%, 2%, 0); }
-      }
-      @keyframes flapBoostGridDrift {
-        from { background-position: 0 0, 0 0; }
-        to { background-position: 56px 56px, 56px 56px; }
-      }
-      @keyframes flapBoostOrbOne {
-        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-        50% { transform: translate3d(42px, 34px, 0) scale(1.14); }
-      }
-      @keyframes flapBoostOrbTwo {
-        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-        50% { transform: translate3d(-46px, 30px, 0) scale(0.88); }
-      }
       @keyframes flapBoostSweep {
         0%, 18% { transform: translateX(-18%) skewX(-12deg); opacity: 0; }
         28% { opacity: 0.78; }
@@ -1206,15 +1194,6 @@ function BoostMotionStyles() {
         0%, 100% { box-shadow: 0 0 0 0 rgba(240,185,11,0.5), 0 0 10px rgba(240,185,11,0.9); }
         50% { box-shadow: 0 0 0 6px rgba(240,185,11,0), 0 0 17px rgba(255,207,61,1); }
       }
-      @keyframes flapBoostPanelGlow {
-        0%, 100% { box-shadow: inset 0 1px 0 rgba(255,226,132,0.05), 0 14px 36px -32px rgba(240,185,11,0.2); }
-        50% { box-shadow: inset 0 1px 0 rgba(255,231,150,0.12), 0 16px 44px -28px rgba(240,185,11,0.42); }
-      }
-      @keyframes flapBoostEngineScan {
-        0%, 22% { transform: translateX(-115%); opacity: 0; }
-        32% { opacity: 0.82; }
-        64%, 100% { transform: translateX(235%); opacity: 0; }
-      }
       @keyframes flapBoostIdleOrbit {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -1222,17 +1201,6 @@ function BoostMotionStyles() {
       @keyframes flapBoostIdlePulse {
         0%, 100% { opacity: 0.32; transform: scale(0.82); }
         50% { opacity: 0.9; transform: scale(1.08); }
-      }
-      @keyframes flapBoostGoldParticle {
-        0%, 100% { opacity: 0; transform: translate3d(0, 24px, 0) scale(0.6); }
-        24% { opacity: 0.95; }
-        72% { opacity: 0.35; }
-        90% { opacity: 0; transform: translate3d(28px, -88px, 0) scale(1.45); }
-      }
-      @keyframes flapBoostGoldSheen {
-        0%, 12% { transform: translateX(-125%) skewX(-16deg); opacity: 0; }
-        24% { opacity: 0.8; }
-        56%, 100% { transform: translateX(430%) skewX(-16deg); opacity: 0; }
       }
       @keyframes flapBoostOnchainOrbit {
         from { transform: rotate(0deg); }
@@ -1251,27 +1219,7 @@ function BoostMotionStyles() {
           radial-gradient(circle at 82% 16%, rgba(255, 213, 90, 0.16), transparent 28%),
           radial-gradient(circle at 58% 78%, rgba(151, 102, 6, 0.13), transparent 34%);
         filter: blur(18px);
-        animation: flapBoostAurora 13s ease-in-out infinite;
-      }
-      .flap-boost-grid {
-        background-image:
-          linear-gradient(rgba(240, 185, 11, 0.05) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(240, 185, 11, 0.05) 1px, transparent 1px);
-        background-size: 56px 56px;
-        mask-image: linear-gradient(to bottom, rgba(0,0,0,0.95), transparent 90%);
-        animation: flapBoostGridDrift 18s linear infinite;
-      }
-      .flap-boost-orb {
-        filter: blur(4px);
-        opacity: 0.34;
-      }
-      .flap-boost-orb-one {
-        background: radial-gradient(circle, rgba(240, 185, 11, 0.18), rgba(125, 85, 5, 0.07) 45%, transparent 72%);
-        animation: flapBoostOrbOne 14s ease-in-out infinite;
-      }
-      .flap-boost-orb-two {
-        background: radial-gradient(circle, rgba(255, 202, 50, 0.16), rgba(153, 91, 20, 0.06) 44%, transparent 72%);
-        animation: flapBoostOrbTwo 16s ease-in-out infinite;
+        opacity: 0.58;
       }
       .flap-boost-shell::before,
       .flap-boost-shell::after {
@@ -1326,7 +1274,6 @@ function BoostMotionStyles() {
       .flap-boost-status-dot { animation: flapBoostStatusPulse 2.7s ease-out infinite; }
       .flap-boost-status-dot { background: #f0b90b !important; }
       .flap-boost-panel {
-        animation: flapBoostPanelGlow 6s ease-in-out infinite;
         border-color: #57451b !important;
         background: linear-gradient(145deg, #111008, #0b0a07) !important;
       }
@@ -1341,26 +1288,7 @@ function BoostMotionStyles() {
       .flap-boost-metrics > * {
         border-color: rgba(103, 80, 23, 0.84);
         background: linear-gradient(145deg, rgba(21,18,8,0.96), rgba(8,7,5,0.98));
-        box-shadow: inset 0 1px 0 rgba(255,222,126,0.055), 0 12px 24px -24px rgba(240,185,11,0.9);
-        transition: border-color 220ms ease, transform 220ms ease, box-shadow 220ms ease;
-      }
-      .flap-boost-metrics > *:hover {
-        transform: translateY(-2px);
-        border-color: rgba(240,185,11,0.82);
-        box-shadow: inset 0 1px 0 rgba(255,237,170,0.13), 0 18px 34px -24px rgba(240,185,11,0.95);
-      }
-      .flap-boost-engine { animation-delay: -2.8s; }
-      .flap-boost-engine-core::after {
-        content: "";
-        pointer-events: none;
-        position: absolute;
-        inset-y: 0;
-        left: 0;
-        width: 34%;
-        background: linear-gradient(90deg, transparent, rgba(240,185,11,0.16), rgba(255,221,116,0.18), transparent);
-        animation: flapBoostEngineScan 7.5s ease-in-out infinite;
-      }
-      .flap-boost-engine-core > * { position: relative; z-index: 1; }
+        box-shadow: inset 0 1px 0 rgba(255,222,126,0.055);
       .flap-boost-workspace::before {
         content: "";
         pointer-events: none;
@@ -1369,14 +1297,6 @@ function BoostMotionStyles() {
         background: radial-gradient(ellipse at 92% 5%, rgba(240,185,11,0.1), transparent 28%);
       }
       .flap-boost-workspace > * { position: relative; }
-      .flap-boost-token-card::before {
-        content: "";
-        pointer-events: none;
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(100deg, rgba(240,185,11,0.075), transparent 28%, transparent 76%, rgba(255,218,96,0.065));
-      }
-      .flap-boost-token-card > * { position: relative; }
       .flap-boost-operation-card::before {
         content: "";
         pointer-events: none;
@@ -1387,17 +1307,6 @@ function BoostMotionStyles() {
         transition: opacity 220ms ease;
       }
       .flap-boost-operation-card:hover::before { opacity: 1; }
-      .flap-boost-operation-card::after {
-        content: "";
-        pointer-events: none;
-        position: absolute;
-        inset-y: -20%;
-        left: -28%;
-        width: 24%;
-        opacity: 0;
-        background: linear-gradient(90deg, transparent, rgba(255,235,166,0.72), transparent);
-      }
-      .flap-boost-operation-card:hover::after { animation: flapBoostGoldSheen 1.35s ease-out; }
       .flap-boost-operation-card > * { position: relative; }
       .flap-boost-empty::before {
         content: "";
@@ -1412,17 +1321,6 @@ function BoostMotionStyles() {
         border-color: #57451b !important;
         background: linear-gradient(145deg, #0e0d08, #090806) !important;
       }
-      .flap-boost-token-card {
-        border-color: #70571a !important;
-        background: linear-gradient(135deg, #181305, #0d0b07) !important;
-      }
-      .flap-boost-particle {
-        background: #ffd45a;
-        box-shadow: 0 0 12px 3px rgba(240,185,11,0.85);
-        animation: flapBoostGoldParticle 8.5s ease-in-out infinite;
-      }
-      .flap-boost-particle-two { animation-delay: -3.1s; animation-duration: 10.5s; }
-      .flap-boost-particle-three { animation-delay: -6.2s; animation-duration: 9.2s; }
       .flap-boost-onchain-loader::before {
         content: "";
         pointer-events: none;
@@ -1434,22 +1332,15 @@ function BoostMotionStyles() {
       .flap-boost-onchain-sweep { animation: flapBoostOnchainSweep 2.8s ease-in-out infinite; }
       @media (prefers-reduced-motion: reduce) {
         .flap-boost-aurora,
-        .flap-boost-grid,
-        .flap-boost-orb-one,
-        .flap-boost-orb-two,
         .flap-boost-shell::after,
         .flap-boost-hero-sweep,
         .flap-boost-hero-ring,
         .flap-boost-hero-ring-inner,
         .flap-boost-status-dot,
-        .flap-boost-panel,
-        .flap-boost-engine-core::after,
         .flap-boost-idle-orbit,
         .flap-boost-idle-pulse,
-        .flap-boost-particle,
         .flap-boost-onchain-orbit,
-        .flap-boost-onchain-sweep,
-        .flap-boost-operation-card:hover::after { animation: none !important; }
+        .flap-boost-onchain-sweep { animation: none !important; }
         .flap-boost-onchain-loader .animate-spin { animation: none !important; }
       }
     `}</style>

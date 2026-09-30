@@ -891,6 +891,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       <BoostMotionStyles />
       <OnchainProgressOverlay t={t} state={txState} visible={activeAction !== null} />
       <div aria-hidden="true" className="flap-boost-aurora pointer-events-none absolute -inset-x-24 -top-36 -z-20 h-[48rem]" />
+      <div aria-hidden="true" className="flap-boost-grid pointer-events-none absolute inset-x-0 top-0 -z-10 h-[48rem]" />
+      <div aria-hidden="true" className="flap-boost-orb flap-boost-orb-one pointer-events-none absolute -left-28 top-24 -z-10 h-60 w-60 rounded-full" />
+      <div aria-hidden="true" className="flap-boost-orb flap-boost-orb-two pointer-events-none absolute right-0 top-48 -z-10 h-72 w-72 rounded-full" />
+      <div aria-hidden="true" className="flap-boost-particle flap-boost-particle-one pointer-events-none absolute left-[12%] top-20 -z-10 h-1.5 w-1.5 rounded-full" />
+      <div aria-hidden="true" className="flap-boost-particle flap-boost-particle-two pointer-events-none absolute right-[18%] top-64 -z-10 h-1 w-1 rounded-full" />
+      <div aria-hidden="true" className="flap-boost-particle flap-boost-particle-three pointer-events-none absolute left-[48%] top-96 -z-10 h-1 w-1 rounded-full" />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[34rem] bg-[radial-gradient(ellipse_at_12%_0%,rgba(65,170,174,0.2),transparent_38%),radial-gradient(ellipse_at_86%_9%,rgba(219,159,94,0.14),transparent_32%)]"
@@ -929,7 +935,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           {!actionsAvailable ? <Alert tone="warning">{t("states.actionsUnavailable")}</Alert> : null}
           {error ? <ErrorDialog t={t} message={error} onDismiss={() => setError(null)} /> : null}
 
-          <section>
+          <section className="flap-boost-reveal">
             <div className="flap-boost-panel relative overflow-hidden rounded-2xl border border-[#2C494E] bg-[#0D171B] p-4 sm:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-[#EFFAF8]">{t("sections.vaultOverview")}</h2>
@@ -948,7 +954,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
             </div>
           </section>
 
-          <section className="flap-boost-workspace relative overflow-hidden rounded-2xl border border-[#263C43] bg-[#0B1014] shadow-[inset_0_1px_0_rgba(190,246,241,0.035)]">
+          <section className="flap-boost-reveal flap-boost-workspace relative overflow-hidden rounded-2xl border border-[#263C43] bg-[#0B1014] shadow-[inset_0_1px_0_rgba(190,246,241,0.035)]">
             <div className="flex flex-col gap-3 border-b border-[#263C43] bg-[#0E171C] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex items-center gap-2.5 text-base font-semibold text-[#F0FAF9]">
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#3E7778] bg-[#11282C] text-[#87E1DC]">
@@ -1019,7 +1025,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                 </div>
               ) : null}
               {activeTokenAddress && showOperationPicker ? (
-                <div className="rounded-xl border border-[#6A551C] bg-[linear-gradient(145deg,#171306,#0D0C08)] p-3.5 shadow-[inset_0_1px_0_rgba(255,224,130,0.06)]">
+                <div className="flap-boost-operation-picker rounded-xl border border-[#6A551C] bg-[linear-gradient(145deg,#171306,#0D0C08)] p-3.5 shadow-[inset_0_1px_0_rgba(255,224,130,0.06)]">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-[#F5DF9B]">{t("sections.addOperation")}</p>
                     <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => setShowOperationPicker(false)}>
@@ -1047,7 +1053,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
             </div>
 
             {showCreateTask ? (
-              <div className="mx-4 mb-5 overflow-hidden rounded-xl border border-[#2F6567] bg-[linear-gradient(145deg,#102026,#0B1116_55%,#14110E)] shadow-[0_18px_44px_-34px_rgba(65,184,179,0.78)] sm:mx-5">
+              <div className="flap-boost-form-reveal mx-4 mb-5 overflow-hidden rounded-xl border border-[#2F6567] bg-[linear-gradient(145deg,#102026,#0B1116_55%,#14110E)] shadow-[0_18px_44px_-34px_rgba(65,184,179,0.78)] sm:mx-5">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#2E5257] px-4 py-4 sm:px-5">
                   <div className="flex items-center gap-3 text-base font-semibold text-[#F0FAF9]">
                     <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#74DED8] text-[#061417] shadow-[0_8px_22px_-10px_rgba(91,217,210,0.88)]">
@@ -1175,6 +1181,41 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
 function BoostMotionStyles() {
   return (
     <style>{`
+      @keyframes flapBoostAurora {
+        0%, 100% { opacity: 0.42; transform: scale(1) translate3d(0, 0, 0); }
+        50% { opacity: 0.86; transform: scale(1.08) translate3d(1.5%, 2%, 0); }
+      }
+      @keyframes flapBoostGridDrift {
+        from { background-position: 0 0, 0 0; }
+        to { background-position: 58px 58px, 58px 58px; }
+      }
+      @keyframes flapBoostOrbOne {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+        50% { transform: translate3d(42px, 34px, 0) scale(1.14); }
+      }
+      @keyframes flapBoostOrbTwo {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+        50% { transform: translate3d(-46px, 30px, 0) scale(0.88); }
+      }
+      @keyframes flapBoostPanelGlow {
+        0%, 100% { box-shadow: inset 0 1px 0 rgba(255,226,132,0.05), 0 14px 36px -32px rgba(240,185,11,0.2); }
+        50% { box-shadow: inset 0 1px 0 rgba(255,231,150,0.13), 0 20px 46px -28px rgba(240,185,11,0.52); }
+      }
+      @keyframes flapBoostParticle {
+        0%, 100% { opacity: 0; transform: translate3d(0, 24px, 0) scale(0.6); }
+        24% { opacity: 0.95; }
+        72% { opacity: 0.36; }
+        90% { opacity: 0; transform: translate3d(28px, -88px, 0) scale(1.45); }
+      }
+      @keyframes flapBoostReveal {
+        from { opacity: 0; transform: translate3d(0, 12px, 0); }
+        to { opacity: 1; transform: translate3d(0, 0, 0); }
+      }
+      @keyframes flapBoostGoldSheen {
+        0%, 12% { transform: translateX(-125%) skewX(-16deg); opacity: 0; }
+        24% { opacity: 0.82; }
+        56%, 100% { transform: translateX(430%) skewX(-16deg); opacity: 0; }
+      }
       @keyframes flapBoostSweep {
         0%, 18% { transform: translateX(-18%) skewX(-12deg); opacity: 0; }
         28% { opacity: 0.78; }
@@ -1213,13 +1254,34 @@ function BoostMotionStyles() {
       }
       .flap-boost-idle-orbit { animation: flapBoostIdleOrbit 7s linear infinite; }
       .flap-boost-idle-pulse { animation: flapBoostIdlePulse 2.4s ease-in-out infinite; }
+      .flap-boost-reveal { animation: flapBoostReveal 620ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+      .flap-boost-operation-picker { animation: flapBoostReveal 360ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+      .flap-boost-form-reveal { animation: flapBoostReveal 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
       .flap-boost-aurora {
         background:
           radial-gradient(circle at 19% 32%, rgba(240, 185, 11, 0.21), transparent 30%),
           radial-gradient(circle at 82% 16%, rgba(255, 213, 90, 0.16), transparent 28%),
           radial-gradient(circle at 58% 78%, rgba(151, 102, 6, 0.13), transparent 34%);
         filter: blur(18px);
-        opacity: 0.58;
+        animation: flapBoostAurora 13s ease-in-out infinite;
+      }
+      .flap-boost-grid {
+        background-image:
+          linear-gradient(rgba(240,185,11,0.055) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(240,185,11,0.055) 1px, transparent 1px);
+        background-size: 58px 58px;
+        mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent 90%);
+        opacity: 0.42;
+        animation: flapBoostGridDrift 18s linear infinite;
+      }
+      .flap-boost-orb { filter: blur(4px); opacity: 0.34; }
+      .flap-boost-orb-one {
+        background: radial-gradient(circle, rgba(240,185,11,0.2), rgba(125,85,5,0.07) 45%, transparent 72%);
+        animation: flapBoostOrbOne 14s ease-in-out infinite;
+      }
+      .flap-boost-orb-two {
+        background: radial-gradient(circle, rgba(255,202,50,0.17), rgba(153,91,20,0.06) 44%, transparent 72%);
+        animation: flapBoostOrbTwo 16s ease-in-out infinite;
       }
       .flap-boost-shell::before,
       .flap-boost-shell::after {
@@ -1276,6 +1338,7 @@ function BoostMotionStyles() {
       .flap-boost-panel {
         border-color: #57451b !important;
         background: linear-gradient(145deg, #111008, #0b0a07) !important;
+        animation: flapBoostPanelGlow 6s ease-in-out infinite;
       }
       .flap-boost-panel::before {
         content: "";
@@ -1289,6 +1352,13 @@ function BoostMotionStyles() {
         border-color: rgba(103, 80, 23, 0.84);
         background: linear-gradient(145deg, rgba(21,18,8,0.96), rgba(8,7,5,0.98));
         box-shadow: inset 0 1px 0 rgba(255,222,126,0.055);
+        transition: border-color 220ms ease, transform 220ms ease, box-shadow 220ms ease;
+      }
+      .flap-boost-metrics > *:hover {
+        transform: translateY(-2px);
+        border-color: rgba(240,185,11,0.84);
+        box-shadow: inset 0 1px 0 rgba(255,237,170,0.13), 0 18px 34px -24px rgba(240,185,11,0.95);
+      }
       .flap-boost-workspace::before {
         content: "";
         pointer-events: none;
@@ -1307,6 +1377,17 @@ function BoostMotionStyles() {
         transition: opacity 220ms ease;
       }
       .flap-boost-operation-card:hover::before { opacity: 1; }
+      .flap-boost-operation-card::after {
+        content: "";
+        pointer-events: none;
+        position: absolute;
+        inset-y: -20%;
+        left: -28%;
+        width: 24%;
+        opacity: 0;
+        background: linear-gradient(90deg, transparent, rgba(255,235,166,0.72), transparent);
+      }
+      .flap-boost-operation-card:hover::after { animation: flapBoostGoldSheen 1.35s ease-out; }
       .flap-boost-operation-card > * { position: relative; }
       .flap-boost-empty::before {
         content: "";
@@ -1321,6 +1402,13 @@ function BoostMotionStyles() {
         border-color: #57451b !important;
         background: linear-gradient(145deg, #0e0d08, #090806) !important;
       }
+      .flap-boost-particle {
+        background: #ffd45a;
+        box-shadow: 0 0 12px 3px rgba(240,185,11,0.85);
+        animation: flapBoostParticle 8.5s ease-in-out infinite;
+      }
+      .flap-boost-particle-two { animation-delay: -3.1s; animation-duration: 10.5s; }
+      .flap-boost-particle-three { animation-delay: -6.2s; animation-duration: 9.2s; }
       .flap-boost-onchain-loader::before {
         content: "";
         pointer-events: none;
@@ -1332,15 +1420,24 @@ function BoostMotionStyles() {
       .flap-boost-onchain-sweep { animation: flapBoostOnchainSweep 2.8s ease-in-out infinite; }
       @media (prefers-reduced-motion: reduce) {
         .flap-boost-aurora,
+        .flap-boost-grid,
+        .flap-boost-orb-one,
+        .flap-boost-orb-two,
         .flap-boost-shell::after,
         .flap-boost-hero-sweep,
         .flap-boost-hero-ring,
         .flap-boost-hero-ring-inner,
         .flap-boost-status-dot,
+        .flap-boost-panel,
         .flap-boost-idle-orbit,
         .flap-boost-idle-pulse,
+        .flap-boost-particle,
+        .flap-boost-reveal,
+        .flap-boost-operation-picker,
+        .flap-boost-form-reveal,
         .flap-boost-onchain-orbit,
-        .flap-boost-onchain-sweep { animation: none !important; }
+        .flap-boost-onchain-sweep,
+        .flap-boost-operation-card:hover::after { animation: none !important; }
         .flap-boost-onchain-loader .animate-spin { animation: none !important; }
       }
     `}</style>

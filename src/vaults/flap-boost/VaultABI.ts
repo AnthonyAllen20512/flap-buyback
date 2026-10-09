@@ -4,12 +4,16 @@ export const factoryAbi = parseAbi([
   "function vaultsOf(address owner) view returns (address[] vaults)",
   "function vaultOf(address owner, address token) view returns (address vault)",
   "function createFixedBNBOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint256 bnbPerRound) returns (address vault, uint256 operationId)",
-  "function createFixedTokenAmountOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint256 tokenAmountPerRound, uint256 maxBNBPerRound) returns (address vault, uint256 operationId)",
+  "function createFixedTokenAmountOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint256 tokenAmountPerRound) returns (address vault, uint256 operationId)",
   "function createBalancePercentageOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint16 balanceBps, uint256 maxBNBPerRound) returns (address vault, uint256 operationId)",
 ]);
 
 export const portalAbi = parseAbi([
   "function quoteExactInput((address inputToken, address outputToken, uint256 inputAmount) params) returns (uint256 outputAmount)",
+]);
+
+export const triggerAbi = parseAbi([
+  "function getRequest(uint256 requestId) view returns ((address requester, uint64 executeAfter, uint8 status, uint128 feePaid))",
 ]);
 
 export const vaultAbi = parseAbi([
@@ -25,9 +29,14 @@ export const vaultAbi = parseAbi([
   "function callbackInProgress() view returns (bool)",
   "function triggerId() view returns (uint256)",
   "function scheduledOperationId() view returns (uint256)",
+  "function pendingTokens() view returns (uint256)",
+  "function pendingOperationId() view returns (uint256)",
+  "function settlePendingOutput()",
   "function reservedBNB() view returns (uint256)",
   "function availableBNB() view returns (uint256)",
   "function fund() payable",
+  "function fundAndTryStart(uint256 id) payable",
+  "function recoverFailedTrigger()",
   "function startOperation(uint256 id)",
   "function pauseOperation(uint256 id)",
   "function resumeOperation(uint256 id)",

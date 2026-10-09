@@ -10,18 +10,32 @@
     "bindings": [
       {
         "chainId": 97,
-        "factoryAddress": "0xcf02a7704196FaDF835A74e34dE0Deef4986612D",
+        "factoryAddress": "0x46D07B676CeEf80CA0fD523563EAAAd214e88134",
         "tokenAddresses": ["0x2865d202f0378df0f23c855a0b09b61721918888"],
         "externalContracts": [
           {
             "address": "0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9",
             "label": "Flap Portal"
+          },
+          {
+            "address": "0x560E9830926C9e0EB98a59c6b9902383Fc0D9Eb2",
+            "label": "Flap Trigger"
           }
         ]
       },
       {
         "chainId": 56,
-        "tokenAddresses": ["0x9adc2f9dbc4578808f0cdb30d51b5199ff4b8888"]
+        "tokenAddresses": ["0x9adc2f9dbc4578808f0cdb30d51b5199ff4b8888"],
+        "externalContracts": [
+          {
+            "address": "0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0",
+            "label": "Flap Portal"
+          },
+          {
+            "address": "0xcf4EE25035CF883895110f367F5BA8172416a7F9",
+            "label": "Flap Trigger"
+          }
+        ]
       }
     ]
   },

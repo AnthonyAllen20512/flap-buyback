@@ -1163,6 +1163,14 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       : marketPhase === "dex-listed"
         ? t("badges.marketDex")
         : t("badges.marketUnknown");
+  const previewHasToken = tokenInfo?.address.toLowerCase() === tokenAddressInput.trim().toLowerCase();
+  const previewTokenSymbol = previewHasToken ? tokenInfo.symbol : t("labels.tokenPending");
+  const previewRule =
+    buyMode === "fixed-bnb"
+      ? `${bnbPerRound || "—"} BNB`
+      : buyMode === "fixed-token"
+        ? `${tokenAmountPerRound || "—"} ${previewHasToken ? previewTokenSymbol : ""}`.trim()
+        : `${balancePercentage || "—"}%`;
   return (
     <div
       data-busy={activeAction !== null}
@@ -1424,6 +1432,32 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     setRandomRecipientCount={setRandomRecipientCount}
                   />
                 </div>
+                <div className="boost-route-preview mx-3 mb-4 overflow-hidden rounded-xl px-3 py-3 sm:mx-5 sm:px-5">
+                  <div className="relative z-10 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <p className="text-xs font-semibold tracking-[0.08em] text-[#F3D99A]">{t("sections.rulePreview")}</p>
+                    <p className="text-[11px] text-[#9BA5A4]">{t("help.rulePreview")}</p>
+                  </div>
+                  <div className="boost-route-grid relative z-10 mt-3 grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-1 sm:grid-cols-[minmax(0,1fr)_36px_minmax(0,1fr)_36px_minmax(0,1fr)] sm:gap-2">
+                    <div className="boost-route-node min-w-0">
+                      <span className="boost-route-icon"><Gauge className="h-4 w-4" /></span>
+                      <span className="boost-route-caption">{t("labels.roundRule")}</span>
+                      <strong className="boost-route-value" title={previewRule}>{previewRule}</strong>
+                    </div>
+                    <span className="boost-route-link" aria-hidden="true"><i /></span>
+                    <div className="boost-route-node min-w-0">
+                      <span className="boost-route-icon"><Coins className="h-4 w-4" /></span>
+                      <span className="boost-route-caption">{t("labels.targetToken")}</span>
+                      <strong className="boost-route-value" title={previewTokenSymbol}>{previewTokenSymbol}</strong>
+                    </div>
+                    <span className="boost-route-link boost-route-link-late" aria-hidden="true"><i /></span>
+                    <div className="boost-route-node min-w-0">
+                      <span className="boost-route-icon">{outputMode === "burn" ? <Flame className="h-4 w-4" /> : outputMode === "retain" ? <Wallet className="h-4 w-4" /> : <Coins className="h-4 w-4" />}</span>
+                      <span className="boost-route-caption">{t("labels.output")}</span>
+                      <strong className="boost-route-value" title={outputLabel(t, outputMode)}>{outputLabel(t, outputMode)}</strong>
+                    </div>
+                  </div>
+                  <p className="relative z-10 mt-3 text-[11px] text-[#A8A89F]">{t("labels.interval")} · {intervalMinutes || "—"} {t("labels.minutes")}</p>
+                </div>
                 <div className="flex flex-col gap-3 border-t border-[#474840] bg-[#091116]/70 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                   <div className="min-w-0 text-xs leading-5 text-[#9AB6B5]">
                     <p>{t("help.createThenFund")}</p>
@@ -1431,12 +1465,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                       <p className="mt-1 text-[#E9BC77]">{t("errors.operationLimit")}</p>
                     ) : config instanceof Error ? (
                       <p className="mt-1 text-[#E9BC77]">{config.message}</p>
-                    ) : (
-                      <p className="mt-1 text-[#F6F2E8]">
-                        {buyModeLabel(t, buyMode === "fixed-bnb" ? 0 : buyMode === "fixed-token" ? 1 : 2)} ·{" "}
-                        {intervalMinutes} {t("labels.minutes")} · {outputLabel(t, outputMode)}
-                      </p>
-                    )}
+                    ) : null}
                     {!context.userAddress ? <p className="mt-1">{t("help.connectToCreate")}</p> : null}
                   </div>
                   <TxButton
@@ -1612,6 +1641,17 @@ function BoostMotionStyles() {
     .boost-vault-sequence span:nth-of-type(2) { animation-delay: .35s; }.boost-vault-sequence span:nth-of-type(3) { animation-delay: .7s; }
     .boost-vault-sequence i { width: 24px; height: 1px; background: linear-gradient(90deg, #E4C57E8C, #E4C57E32); transform-origin: left; animation: boostLink 5.4s ease-in-out infinite; }
     .boost-vault-sequence i:nth-of-type(2) { animation-delay: .35s; }
+    .boost-route-preview { position: relative; isolation: isolate; border: 1px solid #60553E; background: radial-gradient(ellipse at 85% 12%, #BD9A4C1F, transparent 48%), linear-gradient(110deg, #13202A, #0C161E 52%, #1A1B17); box-shadow: inset 0 1px 0 #FFF2C41B, 0 16px 35px -30px #D6B46569; }
+    .boost-route-preview::before { content: ""; pointer-events: none; position: absolute; inset: 0; z-index: 0; opacity: .22; background-image: linear-gradient(#DCC48E0B 1px, transparent 1px), linear-gradient(90deg, #DCC48E0B 1px, transparent 1px); background-size: 20px 20px; mask-image: linear-gradient(90deg, transparent, #000); }
+    .boost-route-preview::after { content: ""; pointer-events: none; position: absolute; top: 0; left: -35%; width: 35%; height: 1px; background: linear-gradient(90deg, transparent, #FFE4A5, transparent); box-shadow: 0 0 9px #DFB963; animation: boostRail 10s ease-in-out infinite; }
+    .boost-route-node { display: grid; grid-template-columns: 27px minmax(0,1fr); grid-template-rows: auto auto; align-items: center; column-gap: 7px; min-height: 52px; border: 1px solid #3D4646; border-radius: 9px; background: #0A141B9C; padding: 6px; transition: border-color 240ms ease, background 240ms ease; }
+    .boost-route-node:last-child { border-color: #726247; background: #241F17B5; }
+    .boost-route-icon { display: grid; grid-row: 1 / span 2; place-items: center; width: 26px; height: 26px; border: 1px solid #9A80506B; border-radius: 7px; color: #EBD393; background: #3B322346; }
+    .boost-route-caption { overflow: hidden; color: #9FABA9; font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+    .boost-route-value { min-width: 0; overflow: hidden; color: #F6F0E3; font: 600 12px/1.3 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .boost-route-link { position: relative; height: 1px; background: linear-gradient(90deg, #806D4A, #DFC983); }
+    .boost-route-link i { position: absolute; top: -2px; left: 0; width: 5px; height: 5px; border-radius: 50%; background: #FFE7A7; box-shadow: 0 0 8px 2px #E1C17472; animation: boostRouteTravel 4.8s ease-in-out infinite; }
+    .boost-route-link-late i { animation-delay: -2.4s; }
     .boost-vault-visual { position: relative; width: 118px; height: 90px; margin-right: 6px; }
     .boost-vault-visual-grid { position: absolute; inset: 3px 15px; border-radius: 50%; background: radial-gradient(circle, #ECD08330 0, #B8953A10 44%, transparent 67%); filter: blur(8px); animation: boostBreathe 4.5s ease-in-out infinite; }
     .boost-vault-ring { position: absolute; border-radius: 50%; border: 1px solid #CDB06C82; box-shadow: 0 0 16px #D6AF5266, inset 0 0 12px #D6AF5233; }
@@ -1680,11 +1720,14 @@ function BoostMotionStyles() {
     @keyframes boostConfirmSweep { from { opacity: 0; transform: translateX(0) skewX(-20deg); } 30% { opacity: 1; } to { opacity: 0; transform: translateX(400%) skewX(-20deg); } }
     @keyframes boostSequence { 0%,20%,100% { opacity: .35; transform: scale(.7); } 35%,52% { opacity: 1; transform: scale(1.2); } }
     @keyframes boostLink { 0%,20%,100% { opacity: .35; transform: scaleX(.3); } 35%,60% { opacity: .9; transform: scaleX(1); } }
+    @keyframes boostRouteTravel { 0%,12%,100% { opacity: 0; transform: translateX(0) scale(.6); } 20% { opacity: .85; } 68% { opacity: .85; transform: translateX(var(--boost-route-distance, 14px)) scale(1); } 76% { opacity: 0; transform: translateX(var(--boost-route-distance, 14px)) scale(.6); } }
     @keyframes boostStepLink { from { opacity: 0; transform: scaleX(.2); } to { opacity: 1; transform: scaleX(1); } }
     @keyframes boostIndex { 0%,28%,100% { color: #BFA976; text-shadow: 0 0 0 transparent; } 35%,50% { color: #FFE4A4; text-shadow: 0 0 9px #EAC8798C; } }
     @keyframes boostOutputPulse { 0%,75%,100% { opacity: .35; transform: translateX(-45%); } 86% { opacity: .85; transform: translateX(45%); } }
     @keyframes boostBalanceDrift { from { transform: translate3d(-4%,0,0); opacity: .45; } to { transform: translate3d(7%,3%,0); opacity: .8; } }
     @keyframes boostBalanceShine { 0%,72% { opacity: 0; transform: translateX(0) skewX(-18deg); } 81% { opacity: .75; } 93%,100% { opacity: 0; transform: translateX(420%) skewX(-18deg); } }
+    @media (min-width: 640px) { .boost-route-link { --boost-route-distance: 32px; } }
+    @media (max-width: 639px) { .boost-route-node { grid-template-columns: 18px minmax(0,1fr); grid-template-rows: 18px auto; column-gap: 3px; padding: 5px; } .boost-route-icon { grid-row: 1; width: 18px; height: 18px; border-radius: 5px; } .boost-route-icon svg { width: 11px; height: 11px; } .boost-route-caption { font-size: 9px; } .boost-route-value { grid-column: 1 / -1; font-size: 10px; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; } }
     @keyframes boostOrbit { to { transform: rotate(360deg); } }
     @keyframes boostBreathe { 0%,100% { opacity: .66; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.07); } }
     @keyframes boostBeam { 0%,12% { opacity: 0; transform: translate3d(0,0,0) rotate(-18deg); } 26% { opacity: .75; } 62% { opacity: .5; } 78%,100% { opacity: 0; transform: translate3d(300%,0,0) rotate(-18deg); } }

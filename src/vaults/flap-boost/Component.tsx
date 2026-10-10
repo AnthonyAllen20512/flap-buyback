@@ -544,6 +544,13 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     context.userAddress && factoryAddress && taskReadState === "ready" && !wrongNetwork && activeAction === null,
   );
   const canTrade = canWrite && actionsAvailable;
+  const tokenReady = Boolean(
+    tokenInfo &&
+      tokenInfo.address.toLowerCase() === tokenAddressInput.trim().toLowerCase() &&
+      minTokensPerBNB !== null &&
+      minTokensPerBNB > 0n &&
+      !tokenLookupLoading,
+  );
   const ownedTokens = useMemo(() => {
     const unique = new Map<string, TokenInfo>();
     for (const task of tasks) unique.set(task.token.address.toLowerCase(), task.token);
@@ -1109,7 +1116,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   );
 
   async function createTask() {
-    if (!canTrade || !factoryAddress || config instanceof Error || operationCountForInput >= 24) {
+    if (!canTrade || !factoryAddress || !tokenReady || config instanceof Error || operationCountForInput >= 24) {
       if (config instanceof Error) setError(config.message);
       return;
     }
@@ -1342,8 +1349,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     );
   }
 
-  const previewHasToken = tokenInfo?.address.toLowerCase() === tokenAddressInput.trim().toLowerCase();
-  const previewTokenSymbol = previewHasToken ? tokenInfo.symbol : t("labels.tokenPending");
+  const previewHasToken = tokenReady;
+  const previewTokenSymbol = previewHasToken && tokenInfo ? tokenInfo.symbol : t("labels.tokenPending");
   const previewRule =
     buyMode === "fixed-bnb"
       ? `${bnbPerRound || "—"} BNB`
@@ -1603,6 +1610,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     lockedToken={Boolean(activeTokenAddress)}
                     tokenInfo={tokenInfo}
                     minTokensPerBNB={minTokensPerBNB}
+                    tokenReady={tokenReady}
                     isLoadingToken={tokenLookupLoading}
                     onLoadToken={() => void loadToken(tokenAddressInput)}
                     buyMode={buyMode}
@@ -1632,7 +1640,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     setRandomRecipientCount={setRandomRecipientCount}
                   />
                 </div>
-                <div className="boost-route-preview mx-3 mb-4 overflow-hidden rounded-xl px-3 py-3 sm:mx-5 sm:px-5">
+                {tokenReady ? <div className="boost-route-preview mx-3 mb-4 overflow-hidden rounded-xl px-3 py-3 sm:mx-5 sm:px-5">
                   <div className="relative z-10 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                     <p className="text-xs font-semibold tracking-[0.08em] text-[#F3D99A]">{t("sections.rulePreview")}</p>
                     <p className="text-[11px] text-[#9BA5A4]">{t("help.rulePreview")}</p>
@@ -1657,13 +1665,13 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     </div>
                   </div>
                   <p className="relative z-10 mt-3 text-[11px] text-[#A8A89F]">{t("labels.interval")} · {intervalMinutes || "—"} {t("labels.minutes")}</p>
-                </div>
+                </div> : null}
                 <div className="flex flex-col gap-3 border-t border-[#474840] bg-[#091116]/70 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                   <div className="min-w-0 text-xs leading-5 text-[#9AB6B5]">
                     <p>{t("help.createThenFund")}</p>
                     {operationCountForInput >= 24 ? (
                       <p className="mt-1 text-[#E9BC77]">{t("errors.operationLimit")}</p>
-                    ) : config instanceof Error ? (
+                    ) : tokenReady && config instanceof Error ? (
                       <p className="mt-1 text-[#E9BC77]">{config.message}</p>
                     ) : null}
                     {!context.userAddress ? <p className="mt-1">{t("help.connectToCreate")}</p> : null}
@@ -1673,7 +1681,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     idleLabel={t(hasExistingVaultForInput ? "buttons.createTask" : "buttons.createVault")}
                     state={buttonState("create-task")}
                     onClick={() => void createTask()}
-                    disabled={!canTrade || tokenLookupLoading || config instanceof Error || operationCountForInput >= 24}
+                    disabled={!canTrade || !tokenReady || config instanceof Error || operationCountForInput >= 24}
                   />
                 </div>
               </div>
@@ -2318,6 +2326,7 @@ function TaskForm({
   lockedToken,
   tokenInfo,
   minTokensPerBNB,
+  tokenReady,
   isLoadingToken,
   onLoadToken,
   buyMode,
@@ -2352,6 +2361,7 @@ function TaskForm({
   lockedToken: boolean;
   tokenInfo: TokenInfo | null;
   minTokensPerBNB: bigint | null;
+  tokenReady: boolean;
   isLoadingToken: boolean;
   onLoadToken: () => void;
   buyMode: BuyMode;
@@ -2450,7 +2460,7 @@ function TaskForm({
             </Button>
           ) : null}
         </div>
-        {tokenInfo && !lockedToken ? (
+        {tokenReady && tokenInfo && !lockedToken ? (
           <div className="boost-token-confirmation mt-3 grid gap-2 rounded-lg border border-[#5B5342] bg-[#151E24] px-3 py-2.5 text-xs text-[#C2C2BB] sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
             <div className="flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#DABF79]/15 text-[#E8D186]">
@@ -2464,6 +2474,12 @@ function TaskForm({
         ) : null}
       </section>
 
+      {!tokenReady ? (
+        <p role="status" className="rounded-xl border border-[#6A5B3C] bg-[#1B1B17] px-4 py-3 text-sm text-[#E7CC87]">
+          {t("help.loadCaBeforeRules")}
+        </p>
+      ) : null}
+      <fieldset disabled={!tokenReady} className={"m-0 min-w-0 space-y-5 border-0 p-0 " + (!tokenReady ? "opacity-45" : "")}>
       <section className="boost-form-step rounded-xl border border-[#3D4548] bg-[#10171E]/75 p-3 sm:p-4">
         <SectionHeading index="02" icon={<Gauge className="h-4 w-4" />} title={t("labels.ruleSettings")} />
         <div className="mt-3 grid grid-cols-3 gap-2">
@@ -2685,6 +2701,7 @@ function TaskForm({
           </div>
         ) : null}
       </section>
+      </fieldset>
     </div>
   );
 }

@@ -3,6 +3,8 @@ import { parseAbi } from "viem";
 export const factoryAbi = parseAbi([
   "function vaultsOf(address owner) view returns (address[] vaults)",
   "function vaultOf(address owner, address token) view returns (address vault)",
+  "function vaultCount() view returns (uint256)",
+  "function vaultsRange(uint256 offset, uint256 limit) view returns (address[] vaults)",
   "function createFixedBNBOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint256 bnbPerRound) returns (address vault, uint256 operationId)",
   "function createFixedTokenAmountOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint256 tokenAmountPerRound) returns (address vault, uint256 operationId)",
   "function createBalancePercentageOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint16 balanceBps, uint256 maxBNBPerRound) returns (address vault, uint256 operationId)",

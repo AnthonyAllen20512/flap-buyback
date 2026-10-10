@@ -6,6 +6,7 @@ import {
   ZERO_ADDRESS,
   erc20Abi,
   formatTokenAmount,
+  getTxErrorKind,
   handleTxError,
   isActionAvailableForPhase,
   isValidAddress,
@@ -36,6 +37,8 @@ import {
 import { factoryAbi, portalAbi, triggerAbi, vaultAbi } from "./VaultABI";
 
 const TASKS_PER_PAGE = 3;
+const PLAZA_PROJECTS_PER_PAGE = 6;
+const PLAZA_VAULTS_PER_LOAD = 12;
 const VAULT_READ_BATCH_SIZE = 4;
 const OPERATION_READ_BATCH_SIZE = 8;
 
@@ -69,6 +72,19 @@ interface TokenInfo {
   address: Address;
   symbol: string;
   decimals: number;
+}
+
+interface PlazaVaultSnapshot {
+  address: Address;
+  owner: Address;
+  token: Address;
+  symbol: string;
+  operationCount: number;
+  runningCount: number;
+  totalSpent: bigint;
+  totalTokensOutput: bigint;
+  decimals: number | null;
+  creationIndex: number;
 }
 
 interface TaskSnapshot {
@@ -376,7 +392,9 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const [loadedIdentity, setLoadedIdentity] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [motionPaused, setMotionPaused] = useState(false);
+  const [activeView, setActiveView] = useState<"plaza" | "mine" | "create">("plaza");
   const [selectedTaskAddress, setSelectedTaskAddress] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"funds" | "rules">("funds");
   // Existing operations are the source of truth for the workspace. The host
   // context token is useful when creating a new operation, but it must not
   // hide a Vault that the connected wallet already owns for another token.
@@ -384,7 +402,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const [error, setError] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [txState, setTxState] = useState<TxButtonState>("idle");
-  const [showCreateTask, setShowCreateTask] = useState(false);
+  const showCreateTask = activeView === "create";
   const [tokenAddressInput, setTokenAddressInput] = useState<string>(context.tokenAddress);
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [minTokensPerBNB, setMinTokensPerBNB] = useState<bigint | null>(null);
@@ -469,7 +487,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   function beginCreateTask(mode: OutputMode) {
     setOutputMode(mode);
     setDistributionMode("fixed");
-    setShowCreateTask(true);
+    setActiveView("create");
     setRetainRecipient("");
     setRecipientsText("");
     if (activeTokenAddress) void loadToken(activeTokenAddress);
@@ -479,13 +497,15 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     setSelectedTokenAddress(address);
     const first = tasks.find((task) => task.token.address.toLowerCase() === address.toLowerCase());
     setSelectedTaskAddress(first ? taskKey(first) : null);
-    setShowCreateTask(false);
+    setDetailTab("funds");
+    setActiveView("mine");
     setFundingAmount("");
     setWithdrawAmount("");
   }
 
   function selectTask(key: string) {
     setSelectedTaskAddress(key);
+    setDetailTab("funds");
     setFundingAmount("");
     setWithdrawAmount("");
   }
@@ -493,7 +513,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   function beginNewToken() {
     setSelectedTokenAddress("");
     setSelectedTaskAddress(null);
-    setShowCreateTask(true);
+    setActiveView("create");
     setOutputMode("burn");
     setDistributionMode("fixed");
     setRetainRecipient("");
@@ -507,6 +527,11 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         : "";
     updateTokenAddress(initialToken);
     if (initialToken) void loadToken(initialToken);
+  }
+
+  function openMine() {
+    if (selectedTokenAddress === "") setSelectedTokenAddress(null);
+    setActiveView("mine");
   }
 
   const config = useMemo<TaskConfig | Error>(() => {
@@ -876,6 +901,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   }, [context.userAddress, factoryAddress, readIdentity, sdk, t, triggerAddress]);
 
   useEffect(() => {
+    if (activeView === "plaza") return;
     let stopped = false;
     let timer: number | undefined;
     const refresh = async () => {
@@ -887,13 +913,13 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [loadTasks, sdk.refetchNonce]);
+  }, [activeView, loadTasks, sdk.refetchNonce]);
 
   useEffect(() => {
     const identity = `${context.chainId}:${context.tokenAddress.toLowerCase()}`;
     if (loadedContextTokenRef.current === identity) return;
     loadedContextTokenRef.current = identity;
-    setShowCreateTask(false);
+    setActiveView("plaza");
     setSelectedTokenAddress(null);
     setSelectedTaskAddress(null);
     updateTokenAddress(context.tokenAddress);
@@ -914,7 +940,25 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         await loadTasks();
         return true;
       } catch (nextError) {
-        const message = handleTxError(nextError, { simulationFailed: t("errors.simulation"), unknown: t("errors.tx") });
+        const kind = getTxErrorKind(nextError);
+        const summary = handleTxError(nextError, {
+          userRejected: t("errors.walletRejected", t("errors.tx")),
+          walletDisconnected: t("errors.walletDisconnected", t("errors.tx")),
+          wrongNetwork: t("errors.wrongNetwork", t("errors.tx")),
+          insufficientFunds: t("errors.insufficientWalletBalance", t("errors.tx")),
+          simulationFailed: t("errors.simulation"),
+          reverted: t("errors.reverted", t("errors.tx")),
+          unknown: t("errors.tx"),
+        });
+        const rawDetail = nextError instanceof Error ? nextError.message.split("\n")[0].trim() : "";
+        const revertedHash = kind === "reverted" && nextError instanceof Error
+          ? nextError.message.match(/0x[a-fA-F0-9]{64}/)?.[0]
+          : undefined;
+        const message = revertedHash
+          ? `${summary} ${revertedHash}`
+          : (kind === "unknown" || kind === "simulationFailed") && rawDetail
+            ? `${summary} · ${rawDetail.slice(0, 160)}`
+            : summary;
         setError(message);
         sdk.notify.error(message);
         setTxState("failed");
@@ -967,10 +1011,11 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        await sdk.waitForTx(hash);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
         setSelectedTokenAddress(config.options.targetToken);
         setSelectedTaskAddress(null);
-        setShowCreateTask(false);
+        setDetailTab("funds");
+        setActiveView("mine");
       },
       t(hasExistingVaultForInput ? "messages.taskCreated" : "messages.vaultCreated"),
     );
@@ -997,7 +1042,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           setTxState("writing");
           const hash = await sdk.writeContract(simulation.request);
           setTxState("confirming");
-          await sdk.waitForTx(hash);
+          if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
           setFundingAmount("");
         },
         t(startWithFunding ? "messages.taskFundedAndMaybeStarted" : "messages.taskFunded"),
@@ -1026,7 +1071,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           setTxState("writing");
           const hash = await sdk.writeContract(simulation.request);
           setTxState("confirming");
-          await sdk.waitForTx(hash);
+          if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
           setWithdrawAmount("");
         },
         t("messages.withdrawn"),
@@ -1059,7 +1104,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        await sdk.waitForTx(hash);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
       },
       message,
     );
@@ -1087,7 +1132,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        await sdk.waitForTx(hash);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
       },
       t(starting ? "messages.started" : "messages.checked"),
     );
@@ -1109,7 +1154,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        await sdk.waitForTx(hash);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
       },
       t("messages.rulesUpdated"),
     );
@@ -1130,7 +1175,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        await sdk.waitForTx(hash);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
       },
       t("messages.outputRetried"),
     );
@@ -1151,18 +1196,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        await sdk.waitForTx(hash);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
       },
       t("messages.triggerRecovered"),
     );
   }
 
-  const marketPhaseLabel =
-    marketPhase === "internal-market"
-      ? t("badges.marketInternal")
-      : marketPhase === "dex-listed"
-        ? t("badges.marketDex")
-        : t("badges.marketUnknown");
   const previewHasToken = tokenInfo?.address.toLowerCase() === tokenAddressInput.trim().toLowerCase();
   const previewTokenSymbol = previewHasToken ? tokenInfo.symbol : t("labels.tokenPending");
   const previewRule =
@@ -1180,13 +1219,18 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       <BoostMotionStyles />
       <OnchainProgressOverlay t={t} state={txState} visible={activeAction !== null} />
       <Card className="flap-boost-shell overflow-hidden rounded-[20px]">
-        <CardHeader className="boost-header px-5 pb-7 pt-7 sm:px-8 sm:pb-9 sm:pt-9">
+        <CardHeader className="boost-header px-5 pb-5 pt-6 sm:px-8 sm:pb-6 sm:pt-7">
           <div className="boost-atmosphere" aria-hidden="true">
             <span className="boost-aura boost-aura-blue" />
             <span className="boost-aura boost-aura-gold" />
             <span className="boost-grid" />
             <span className="boost-atmosphere-beam boost-atmosphere-beam-one" />
             <span className="boost-atmosphere-beam boost-atmosphere-beam-two" />
+            <span className="boost-atmosphere-current" />
+            <span className="boost-hero-corner boost-hero-corner-tl" />
+            <span className="boost-hero-corner boost-hero-corner-tr" />
+            <span className="boost-hero-corner boost-hero-corner-bl" />
+            <span className="boost-hero-corner boost-hero-corner-br" />
             <span className="boost-motes">
               {Array.from({ length: 10 }, (_, index) => <span key={index} />)}
             </span>
@@ -1195,46 +1239,71 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
             <span className="boost-spark boost-spark-three" />
           </div>
           <div className="boost-hero-layout">
-            <div className="boost-hero-copy min-w-0">
+            <div key={activeView} className="boost-hero-copy min-w-0">
               <div className="boost-kicker">
                 <span className="boost-kicker-dot" />
                 <span>FLAP BOOST</span>
-                <span className="boost-kicker-divider" />
-                <span>{t("badges.automation")}</span>
               </div>
-              <CardTitle className="boost-hero-title mt-5 text-[30px] font-semibold leading-tight tracking-tight sm:text-[38px]">
-                {t("sections.controlCenter")}
+              <CardTitle className="boost-hero-title mt-4 text-[30px] font-semibold leading-tight tracking-tight sm:text-[40px]">
+                {t(activeView === "plaza" ? "plaza.heroTitle" : activeView === "create" ? "sections.createVault" : "sections.tokenWorkspace")}
               </CardTitle>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-[#B4B6B2] sm:text-[15px]">{t("subtitle")}</p>
-              <div className="boost-hero-steps mt-7" aria-label={t("sections.engine")}>
+              <p className="boost-hero-description mt-3 max-w-xl text-sm leading-6 text-[#C4C6C2]">
+                {t(activeView === "plaza" ? "plaza.heroSubtitle" : activeView === "create" ? "nav.createHint" : "nav.mineHint")}
+              </p>
+              {activeView === "create" ? <div className="boost-hero-steps mt-4" aria-label={t("sections.engine")}>
                 <span><b>01</b>{t("workflow.create")}</span>
                 <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
                 <span><b>02</b>{t("workflow.fund")}</span>
                 <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
                 <span><b>03</b>{t("workflow.execute")}</span>
-              </div>
+              </div> : null}
             </div>
-            <div className="boost-hero-side">
-              <StatusBadge muted={!actionsAvailable}>{marketPhaseLabel}</StatusBadge>
-              <div className="boost-hero-emblem" aria-hidden="true">
-                <span className="boost-emblem-halo" />
-                <span className="boost-emblem-sweep" />
-                <span className="boost-emblem-orbit boost-emblem-orbit-outer" />
-                <span className="boost-emblem-orbit boost-emblem-orbit-inner" />
-                <span className="boost-emblem-ripple boost-emblem-ripple-one" />
-                <span className="boost-emblem-ripple boost-emblem-ripple-two" />
-                <span className="boost-emblem-core">
-                  <span className="boost-wing boost-wing-upper-left" />
-                  <span className="boost-wing boost-wing-upper-right" />
-                  <span className="boost-wing boost-wing-lower-left" />
-                  <span className="boost-wing boost-wing-lower-right" />
-                  <span className="boost-wing-body" />
+            <div className="boost-hero-side" aria-hidden="true">
+              <div className="boost-cycle">
+                <span className="boost-cycle-track boost-cycle-track-outer" />
+                <span className="boost-cycle-track boost-cycle-track-inner" />
+                <span className="boost-cycle-sweep" />
+                <span className="boost-cycle-packet boost-cycle-packet-one" />
+                <span className="boost-cycle-packet boost-cycle-packet-two" />
+                <span className="boost-cycle-packet boost-cycle-packet-three" />
+                <span className="boost-cycle-trace boost-cycle-trace-one" />
+                <span className="boost-cycle-trace boost-cycle-trace-two" />
+                <span className="boost-cycle-node boost-cycle-node-bnb"><CircleDollarSign className="h-5 w-5" /></span>
+                <span className="boost-cycle-node boost-cycle-node-token"><Coins className="h-5 w-5" /></span>
+                <span className="boost-cycle-node boost-cycle-node-output"><Flame className="h-5 w-5" /></span>
+                <span className="boost-cycle-center">
+                  <span className="boost-emblem-core">
+                    <span className="boost-wing boost-wing-upper-left" />
+                    <span className="boost-wing boost-wing-upper-right" />
+                    <span className="boost-wing boost-wing-lower-left" />
+                    <span className="boost-wing boost-wing-lower-right" />
+                    <span className="boost-wing-body" />
+                  </span>
                 </span>
               </div>
             </div>
           </div>
         </CardHeader>
         <CardContent className="boost-content space-y-4 px-3 pb-4 pt-4 sm:px-6 sm:pb-6 sm:pt-5">
+          <nav className="boost-view-tabs grid grid-cols-2 gap-2" aria-label={t("plaza.viewLabel")}>
+            <button type="button" aria-pressed={activeView === "plaza"} className="boost-view-tab" onClick={() => setActiveView("plaza")}>
+              <span className="boost-view-tab-index">01</span>
+              <span className="boost-view-tab-copy"><strong>{t("plaza.tab")}</strong></span>
+              <ChevronRight className="boost-view-tab-arrow h-4 w-4" aria-hidden="true" />
+            </button>
+            <button type="button" aria-pressed={activeView !== "plaza"} className="boost-view-tab" onClick={openMine}>
+              <span className="boost-view-tab-index">02</span>
+              <span className="boost-view-tab-copy"><strong>{t("nav.mine")}</strong></span>
+              <ChevronRight className="boost-view-tab-arrow h-4 w-4" aria-hidden="true" />
+            </button>
+          </nav>
+          {activeView === "plaza" ? (
+            <BuybackPlaza
+              factoryAddress={factoryAddress}
+              onCreate={beginNewToken}
+            />
+          ) : (
+          <>
           {wrongNetwork ? (
             <Alert tone="warning">
               {t("states.wrongNetwork", undefined, { chain: sdk.wallet.requiredChainLabel })}
@@ -1256,7 +1325,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           {error ? <ErrorDialog t={t} message={error} onDismiss={() => setError(null)} /> : null}
           {taskReadState === "error" && tasks.length > 0 ? <Alert tone="warning">{t("states.staleRead")}</Alert> : null}
 
-          {context.userAddress && tasks.length > 0 ? (
+          {activeView === "mine" && context.userAddress && tasks.length > 0 ? (
             <section
               aria-label={t("sections.vaultOverview")}
               className="rounded-xl border border-[#394148] bg-[#0E141A]/70 py-2"
@@ -1275,7 +1344,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           ) : null}
 
           <section className="flap-boost-workspace relative overflow-hidden rounded-2xl">
-            <div className="boost-workspace-header flex items-center justify-between gap-3 px-4 py-4 sm:px-6 sm:py-5">
+            {activeView === "mine" ? <div className="boost-workspace-header flex items-center justify-between gap-3 px-4 py-4 sm:px-6 sm:py-5">
               <div className="flex items-center gap-3 text-base font-semibold text-[#F6F1E8]">
                 <span className="boost-workspace-icon flex h-9 w-9 items-center justify-center rounded-xl">
                   <Settings2 className="h-4 w-4" />
@@ -1294,7 +1363,6 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   onClick={() => setMotionPaused((value) => !value)}
                 >
                   {motionPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-                  <span className="hidden sm:inline">{t(motionPaused ? "buttons.resumeMotion" : "buttons.pauseMotion")}</span>
                 </Button>
                 <Button
                   type="button"
@@ -1322,21 +1390,21 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     {t("buttons.addOperation")}
                   </Button>
                 ) : null}
-                {ownedTokens.length > 0 && !showCreateTask ? (
+                {ownedTokens.length > 0 ? (
                   <Button
                     type="button"
                     size="sm"
-                    className={GOLD_PRIMARY_BUTTON + " h-10 flex-1 rounded-lg px-4 text-xs sm:flex-none"}
+                    className={GOLD_PRIMARY_BUTTON + " h-10 rounded-lg px-4 text-xs"}
                     onClick={beginNewToken}
                     disabled={activeAction !== null}
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    {t("buttons.newToken")}
+                    {t("nav.create")}
                   </Button>
                 ) : null}
               </div>
-            </div>
-            {ownedTokens.length ? (
+            </div> : null}
+            {activeView === "mine" && ownedTokens.length ? (
               <div className="space-y-4 px-4 pb-4 pt-4 sm:px-5">
                 <div className="flex flex-wrap gap-2" role="group" aria-label={t("labels.selectToken")}>
                   {ownedTokens.map((token) => {
@@ -1370,7 +1438,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
 
             {showCreateTask ? (
               <div className="flap-boost-form-reveal mx-4 mb-5 mt-4 overflow-hidden rounded-2xl sm:mx-6">
-                <div className="boost-vault-panel-head flex min-h-[124px] items-center justify-between gap-3 border-b border-[#67583B] px-4 py-4 sm:px-6">
+                <div className="boost-vault-panel-head flex items-center justify-between gap-3 border-b border-[#67583B] px-4 py-4 sm:px-6">
                   <div className="relative z-10 min-w-0 flex-1">
                     <p className="boost-vault-eyebrow text-[10px] font-bold tracking-[0.2em] text-[#E7CC87]">
                       {t(hasExistingVaultForInput ? "labels.existingVault" : "labels.newVault")}
@@ -1381,19 +1449,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     <p className="mt-1 max-w-lg text-xs leading-5 text-[#B8B9AE] sm:text-[13px]">
                       {t(hasExistingVaultForInput ? "help.existingTokenCreate" : "help.newVaultCreate")}
                     </p>
-                    <div className="boost-vault-sequence mt-3 flex items-center gap-1.5" aria-hidden="true">
-                      <span /><i /><span /><i /><span />
-                    </div>
                   </div>
-                  <div className="boost-vault-visual hidden shrink-0 sm:block" aria-hidden="true">
-                    <span className="boost-vault-visual-grid" />
-                    <span className="boost-vault-ring boost-vault-ring-outer" />
-                    <span className="boost-vault-ring boost-vault-ring-inner" />
-                    <span className="boost-vault-visual-core"><Wallet className="h-5 w-5" strokeWidth={1.6} /></span>
-                    <span className="boost-vault-beacon boost-vault-beacon-one" />
-                    <span className="boost-vault-beacon boost-vault-beacon-two" />
-                  </div>
-                  <Button type="button" variant="ghost" size="sm" className="relative z-10 self-start px-2 text-xs text-[#BDB9AB]" onClick={() => setShowCreateTask(false)}>
+                  <Button type="button" variant="ghost" size="sm" className="relative z-10 self-start px-2 text-xs text-[#BDB9AB]" onClick={openMine}>
                     <X className="h-4 w-4" />
                     {t("buttons.cancel")}
                   </Button>
@@ -1479,7 +1536,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               </div>
             ) : null}
 
-            <div className="px-4 pb-4 sm:px-5 sm:pb-5">
+            {activeView === "mine" ? <div className="px-4 pb-4 sm:px-5 sm:pb-5">
               {tokenTasks.length ? (
                 <p className="mb-3 text-sm font-semibold text-[#F5F0E5]">{t("sections.tokenOperations")}</p>
               ) : null}
@@ -1492,12 +1549,18 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               />
               {!tokenTasks.length && !showCreateTask ? (
                 <div className="boost-empty flex flex-col items-center gap-4 rounded-2xl px-5 py-10 text-center sm:flex-row sm:px-7 sm:py-9 sm:text-left">
-                  <span className="boost-empty-icon flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl">
-                    {taskReadState === "loading" ? (
-                      <RefreshCw className="h-6 w-6 animate-spin motion-reduce:animate-none" />
-                    ) : (
-                      <Coins className="h-6 w-6" strokeWidth={1.5} />
-                    )}
+                  <span className="boost-empty-seal shrink-0" aria-hidden="true">
+                    <span className="boost-empty-seal-ring boost-empty-seal-ring-outer" />
+                    <span className="boost-empty-seal-ring boost-empty-seal-ring-inner" />
+                    <span className="boost-empty-seal-ray boost-empty-seal-ray-one" />
+                    <span className="boost-empty-seal-ray boost-empty-seal-ray-two" />
+                    <span className="boost-empty-icon flex h-14 w-14 items-center justify-center rounded-2xl">
+                      {taskReadState === "loading" ? (
+                        <RefreshCw className="h-6 w-6 animate-spin motion-reduce:animate-none" />
+                      ) : (
+                        <Coins className="h-6 w-6" strokeWidth={1.5} />
+                      )}
+                    </span>
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-base font-semibold text-[#F6F1E8]">
@@ -1519,12 +1582,16 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   ) : null}
                 </div>
               ) : null}
-            </div>
+            </div> : null}
           </section>
 
           {selectedTask && !showCreateTask ? (
-            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(23rem,0.72fr)]">
-              <TaskFunding
+            <section className="boost-management mx-4 space-y-3 sm:mx-5" aria-label={t("nav.detailLabel")}>
+              <div className="boost-detail-tabs flex items-center gap-1 rounded-xl border border-[#514832] bg-[#090D12] p-1" role="group" aria-label={t("nav.detailLabel")}>
+                <button type="button" aria-pressed={detailTab === "funds"} className="boost-view-tab flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold" onClick={() => setDetailTab("funds")}>{t("nav.funds")}</button>
+                <button type="button" aria-pressed={detailTab === "rules"} className="boost-view-tab flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold" onClick={() => setDetailTab("rules")}>{t("nav.rules")}</button>
+              </div>
+              {detailTab === "funds" ? <TaskFunding
                 key={taskKey(selectedTask)}
                 t={t}
                 task={selectedTask}
@@ -1546,8 +1613,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                 onCheck={() => void checkAndSchedule()}
                 onSettle={() => void settleOutput()}
                 onRecover={() => void recoverTrigger()}
-              />
-              <TaskOverview
+              /> : <TaskOverview
                 key={taskKey(selectedTask)}
                 t={t}
                 locale={i18n.locale}
@@ -1556,12 +1622,243 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                 isOwner={selectedTaskIsOwner}
                 buttonState={buttonState("rules:" + selectedTask.address)}
                 onUpdate={(update) => updateTaskRules(selectedTask, update)}
-              />
+              />}
             </section>
           ) : null}
+          </>
+          )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | null; onCreate: () => void }) {
+  const sdk = useFlapSdk();
+  const t = sdk.i18n.t;
+  const [vaults, setVaults] = useState<PlazaVaultSnapshot[]>([]);
+  const [readState, setReadState] = useState<"loading" | "ready" | "error">("loading");
+  const [totalVaultCount, setTotalVaultCount] = useState<number | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [showAll, setShowAll] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const nextOffsetRef = useRef<number | null>(null);
+  const requestRef = useRef(0);
+
+  const projects = useMemo(() => [...vaults].sort((a, b) =>
+    a.runningCount !== b.runningCount ? b.runningCount - a.runningCount : b.creationIndex - a.creationIndex,
+  ), [vaults]);
+  const searchTerm = searchQuery.trim().toLowerCase();
+  const visibleProjects = projects.filter((project) =>
+    (showAll || project.runningCount > 0) &&
+    (!searchTerm || [project.symbol, project.token, project.address, project.owner].some((value) =>
+      value.toLowerCase().includes(searchTerm),
+    )),
+  );
+  const totalPages = Math.max(1, Math.ceil(visibleProjects.length / PLAZA_PROJECTS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedProjects = visibleProjects.slice(
+    (currentPage - 1) * PLAZA_PROJECTS_PER_PAGE,
+    currentPage * PLAZA_PROJECTS_PER_PAGE,
+  );
+
+  const loadProjects = useCallback(async (reset: boolean) => {
+    const requestId = ++requestRef.current;
+    if (reset) {
+      setVaults([]);
+      setTotalVaultCount(null);
+      setReadState("loading");
+      setHasOlder(false);
+      setPage(1);
+      nextOffsetRef.current = null;
+    } else {
+      setLoadingOlder(true);
+    }
+    if (!factoryAddress) {
+      setTotalVaultCount(null);
+      setReadState("ready");
+      setLoadingOlder(false);
+      return;
+    }
+    try {
+      const count = await sdk.readContract<bigint>({
+        contract: "boostFactory",
+        address: factoryAddress,
+        abi: factoryAbi,
+        functionName: "vaultCount",
+      });
+      if (count > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Vault count exceeds safe pagination.");
+      if (requestId !== requestRef.current) return;
+      setTotalVaultCount(Number(count));
+      const cursor = reset ? Number(count) : nextOffsetRef.current;
+      if (cursor === null || cursor <= 0) {
+        nextOffsetRef.current = null;
+        setHasOlder(false);
+        setReadState("ready");
+        return;
+      }
+      const offset = Math.max(0, cursor - PLAZA_VAULTS_PER_LOAD);
+      const addresses = await sdk.readContract<Address[]>({
+        contract: "boostFactory",
+        address: factoryAddress,
+        abi: factoryAbi,
+        functionName: "vaultsRange",
+        args: [BigInt(offset), BigInt(cursor - offset)],
+      });
+      if (requestId !== requestRef.current) return;
+      if (addresses.length !== cursor - offset) throw new Error("Incomplete Factory page.");
+      const indexed = addresses.map((address, index) => ({ address, creationIndex: offset + index })).reverse();
+      const loaded = await mapInBatches(indexed, VAULT_READ_BATCH_SIZE, async ({ address, creationIndex }): Promise<PlazaVaultSnapshot | null> => {
+        try {
+          const [owner, token, operationCount, availableBNB, reservedBNB] = await Promise.all([
+            sdk.readContract<Address>({ contract: "boostVault", address, abi: vaultAbi, functionName: "owner" }),
+            sdk.readContract<Address>({ contract: "boostVault", address, abi: vaultAbi, functionName: "targetToken" }),
+            sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "operationCount" }),
+            sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "availableBNB" }),
+            sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "reservedBNB" }),
+          ]);
+          const [symbol, decimals] = await Promise.all([
+            sdk.readContract<string>({
+              contract: "token", address: token, abi: erc20Abi, functionName: "symbol",
+            }).catch(() => shortAddress(token)),
+            sdk.readContract<number>({
+              contract: "token", address: token, abi: erc20Abi, functionName: "decimals",
+            }).catch(() => null),
+          ]);
+          const safeDecimals = decimals !== null && Number.isInteger(decimals) && decimals >= 0 && decimals <= 255 ? decimals : null;
+          const operations = await mapInBatches(
+            Array.from({ length: Number(operationCount) }, (_, id) => id),
+            OPERATION_READ_BATCH_SIZE,
+            (id) => sdk.readContract<VaultOperationRead>({
+              contract: "boostVault", address, abi: vaultAbi, functionName: "getOperation", args: [BigInt(id)],
+            }),
+          );
+          return {
+            address,
+            owner,
+            token,
+            symbol: symbol || shortAddress(token),
+            operationCount: operations.length,
+            runningCount: availableBNB + reservedBNB > 0n
+              ? operations.filter((operation) => operation.active && operation.started && !operation.paused).length
+              : 0,
+            totalSpent: operations.reduce((sum, operation) => sum + operation.totalBNBSpent, 0n),
+            totalTokensOutput: operations.reduce((sum, operation) => sum + operation.totalTokensOutput, 0n),
+            decimals: safeDecimals,
+            creationIndex,
+          };
+        } catch {
+          return null;
+        }
+      });
+      if (requestId !== requestRef.current) return;
+      if (addresses.length > 0 && loaded.every((vault) => vault === null)) throw new Error("Vault reads failed.");
+      setVaults((current) => {
+        const byAddress = new Map<string, PlazaVaultSnapshot>(current.map(
+          (vault): [string, PlazaVaultSnapshot] => [vault.address.toLowerCase(), vault],
+        ));
+        for (const vault of loaded) if (vault) byAddress.set(vault.address.toLowerCase(), vault);
+        return [...byAddress.values()];
+      });
+      nextOffsetRef.current = offset > 0 ? offset : null;
+      setHasOlder(nextOffsetRef.current !== null);
+      setReadState("ready");
+    } catch {
+      if (requestId === requestRef.current) setReadState("error");
+    } finally {
+      if (requestId === requestRef.current) setLoadingOlder(false);
+    }
+  }, [factoryAddress, sdk]);
+
+  useEffect(() => {
+    void loadProjects(true);
+    return () => { requestRef.current += 1; };
+  }, [loadProjects, sdk.refetchNonce]);
+
+  const networkLabel = t(sdk.context.chainId === 97 ? "plaza.testnet" : sdk.context.chainId === 56 ? "plaza.mainnet" : "plaza.otherNetwork");
+
+  return (
+    <section className="boost-plaza rounded-2xl border p-4 sm:p-6" aria-label={t("plaza.tab")}>
+      <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="boost-plaza-network rounded-full px-3 py-1 text-xs font-semibold">{networkLabel}</span>
+          <span className="text-xs text-[#AEB7B5]">{t("plaza.currentNetworkOnly")}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {totalVaultCount !== null ? <span className="font-mono text-sm font-semibold text-[#E7CC87]">{t("plaza.totalCount", undefined, { count: totalVaultCount })}</span> : null}
+          <Button type="button" variant="outline" size="sm" className={GOLD_OUTLINE_BUTTON + " h-9 px-3 text-xs"} disabled={readState === "loading" || loadingOlder} onClick={() => void loadProjects(true)}>
+            <RefreshCw className="h-3.5 w-3.5" />{t("buttons.refresh")}
+          </Button>
+        </div>
+      </div>
+      {readState === "ready" && totalVaultCount !== null && totalVaultCount > 0 ? <>
+      <Input
+        aria-label={t("plaza.search")}
+        value={searchQuery}
+        onChange={(event) => { setSearchQuery(event.target.value); setPage(1); }}
+        placeholder={t("plaza.search")}
+        className="relative z-10 mt-5 h-11 w-full rounded-lg border-[#5B5548] bg-[#080D11] px-4 font-mono text-sm text-[#F8F2E8] placeholder:font-sans placeholder:text-[#82918E] focus:border-[#DABF79]"
+      />
+      <div className="relative z-10 mt-3 flex flex-wrap items-center gap-2" role="group" aria-label={t("plaza.filterLabel")}>
+        <button type="button" className="boost-plaza-filter rounded-full px-3 py-1.5 text-xs" aria-pressed={!showAll} onClick={() => { setShowAll(false); setPage(1); }}>{t("plaza.runningFilter")}</button>
+        <button type="button" className="boost-plaza-filter rounded-full px-3 py-1.5 text-xs" aria-pressed={showAll} onClick={() => { setShowAll(true); setPage(1); }}>{t("plaza.allFilter")}</button>
+        <span className="ml-auto text-xs text-[#A3AAA6]">{t("plaza.projectCount", undefined, { count: visibleProjects.length })}</span>
+      </div>
+      </> : null}
+      {!factoryAddress ? <Alert tone="warning">{t("plaza.factoryUnavailable")}</Alert> : null}
+      {readState === "loading" ? <p className="relative z-10 mt-5 flex items-center gap-2 text-sm text-[#C8C0A9]"><RefreshCw className="h-4 w-4 animate-spin motion-reduce:animate-none" />{t("plaza.loading")}</p> : null}
+      {readState === "error" ? <Alert tone="warning">{t("plaza.readFailed")}</Alert> : null}
+      {pagedProjects.length ? (
+        <div className="relative z-10 mt-4 space-y-2">
+          {pagedProjects.map((project, index) => (
+            <article key={project.address} className="boost-plaza-card boost-plaza-row rounded-xl border px-4 py-3.5" style={{ animationDelay: `${index * 75}ms` }}>
+              <div className="boost-plaza-project min-w-0">
+                <p className="truncate text-base font-semibold text-[#FFF2D2]">{project.symbol}</p>
+                <p className="mt-0.5 truncate font-mono text-[11px] text-[#A6B5B1]" title={project.token}>{project.token}</p>
+                <p className="mt-1.5 truncate text-[11px] text-[#8E9693]">{t("plaza.owner")}: {shortAddress(project.owner)} · Vault {shortAddress(project.address)}</p>
+              </div>
+              <div className="boost-plaza-fact"><p>{t("plaza.operations")}</p><strong>{project.runningCount}/{project.operationCount}</strong></div>
+              <div className="boost-plaza-fact"><p>{t("plaza.spent")}</p><strong>{formatTokenAmount(project.totalSpent, 18)} BNB</strong></div>
+              <div className="boost-plaza-fact"><p>{t("labels.totalTokensOut")}</p><strong title={project.decimals === null ? undefined : `${formatTokenAmount(project.totalTokensOutput, project.decimals)} ${project.symbol}`}>{project.decimals === null ? "—" : `${formatTokenAmount(project.totalTokensOutput, project.decimals)} ${project.symbol}`}</strong></div>
+              <div className="boost-plaza-row-status">
+                <span className={"boost-plaza-status shrink-0 rounded-full px-2.5 py-1 text-[11px] " + (project.runningCount ? "boost-plaza-status-live" : "")}>
+                  {t(project.runningCount ? "plaza.running" : "plaza.notRunning")}
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : readState === "ready" && factoryAddress && totalVaultCount === 0 ? (
+        <div className="boost-plaza-empty relative z-10 mt-4 flex flex-col items-center gap-4 rounded-xl border px-5 py-5 text-center sm:flex-row sm:text-left">
+          <span className="boost-plaza-empty-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"><Coins className="h-6 w-6" strokeWidth={1.5} /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-semibold text-[#F4E9CF]">{t("plaza.noProjects")}</p>
+            <p className="mt-1 text-xs leading-5 text-[#9FAAA7]">{t("plaza.emptyFactoryHint")}</p>
+          </div>
+          <Button type="button" size="sm" className={GOLD_PRIMARY_BUTTON + " h-10 shrink-0 px-4 text-xs"} onClick={onCreate}><Plus className="h-3.5 w-3.5" />{t("plaza.create")}</Button>
+        </div>
+      ) : readState === "ready" && factoryAddress && totalVaultCount !== null && totalVaultCount > 0 ? (
+        <div className="relative z-10 mt-4 rounded-lg border border-[#3B4747] bg-[#0D151A] px-4 py-5 text-center">
+          <p className="text-sm font-semibold text-[#F4E9CF]">{t(searchTerm ? "plaza.noMatch" : "plaza.noRunning")}</p>
+          <p className="mt-1 text-xs text-[#9FAAA7]">{t(searchTerm ? "plaza.noMatchHint" : "plaza.emptyHint")}</p>
+        </div>
+      ) : null}
+      {totalVaultCount !== null && totalVaultCount > 0 ? <div className="relative z-10 mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[11px] text-[#84918F]">{t(hasOlder ? "plaza.partialHistory" : "plaza.chainSource")}</p>
+        <div className="flex items-center gap-2">
+          {totalPages > 1 ? (
+            <>
+              <Button type="button" variant="outline" size="sm" className={GOLD_OUTLINE_BUTTON + " h-8 px-2 text-xs"} disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>{t("buttons.previousPage")}</Button>
+              <span className="text-xs text-[#C7BFA9]">{t("labels.pageOf", undefined, { page: currentPage, total: totalPages })}</span>
+              <Button type="button" variant="outline" size="sm" className={GOLD_OUTLINE_BUTTON + " h-8 px-2 text-xs"} disabled={currentPage >= totalPages} onClick={() => setPage(currentPage + 1)}>{t("buttons.nextPage")}</Button>
+            </>
+          ) : null}
+          {hasOlder ? <Button type="button" variant="outline" size="sm" className={GOLD_OUTLINE_BUTTON + " h-8 px-3 text-xs"} disabled={loadingOlder} onClick={() => void loadProjects(false)}>{loadingOlder ? t("plaza.loading") : t("plaza.loadOlder")}</Button> : null}
+        </div>
+      </div> : null}
+    </section>
   );
 }
 
@@ -1573,6 +1870,7 @@ function BoostMotionStyles() {
     .flap-boost-shell::before { content: ""; position: absolute; z-index: 3; inset: 0 0 auto; height: 2px; background: linear-gradient(90deg, transparent 0%, #8A7444 16%, #F4DC99 45%, #9E824B 78%, transparent); opacity: .9; }
     .boost-content, .boost-header { position: relative; z-index: 1; }
     .boost-header { overflow: hidden; border-bottom: 1px solid #4B4435; background: radial-gradient(circle at 76% 45%, #9E78312B 0%, transparent 31%), radial-gradient(circle at 12% 10%, #25374688 0%, transparent 52%), linear-gradient(115deg, #101925, #0B1018 56%, #15140F); }
+    .boost-header::before { content: ""; pointer-events: none; position: absolute; inset: 11px; z-index: 0; border: 1px solid #E6C88121; border-radius: 11px; box-shadow: inset 0 0 0 5px #E6C88106; }
     .boost-header::after { content: ""; pointer-events: none; position: absolute; inset: auto 0 0; height: 1px; background: linear-gradient(90deg, transparent, #E8C775, #FFF2B6, transparent); box-shadow: 0 0 20px #DEB96988; }
     .boost-atmosphere { position: absolute; pointer-events: none; inset: 0; overflow: hidden; z-index: 0; }
     .boost-aura { position: absolute; width: 540px; height: 330px; border-radius: 50%; filter: blur(15px); animation: boostDrift 16s ease-in-out infinite alternate; }
@@ -1581,32 +1879,50 @@ function BoostMotionStyles() {
     .boost-grid { position: absolute; inset: 0; opacity: .45; background-image: linear-gradient(#D8C1900A 1px, transparent 1px), linear-gradient(90deg, #D8C1900A 1px, transparent 1px); background-size: 32px 32px; mask-image: linear-gradient(#0008, transparent 86%); }
     .boost-atmosphere-beam { position: absolute; width: 56%; height: 1px; left: -56%; background: linear-gradient(90deg, transparent, #F8E6AF9C 45%, #FFF4D6 52%, transparent); box-shadow: 0 0 12px #EDCE8480; transform: rotate(-18deg); animation: boostBeam 10s ease-in-out infinite; }
     .boost-atmosphere-beam-one { top: 24%; }.boost-atmosphere-beam-two { top: 68%; animation-delay: -5s; opacity: .6; }
-    .boost-motes { position: absolute; inset: 0; }
+    .boost-atmosphere-current { position: absolute; top: 70%; left: 3%; width: 69%; height: 1px; transform: rotate(-18deg); transform-origin: left center; background: linear-gradient(90deg, transparent, #C9AE6B48 18%, #E6CF9166 70%, transparent); }
+    .boost-atmosphere-current::after { content: ""; position: absolute; top: -2px; left: 0; width: 15%; height: 5px; border-radius: 50%; background: linear-gradient(90deg, transparent, #FFE7AA99 50%, transparent); filter: blur(2px); animation: boostCurrentFlow 8.4s cubic-bezier(.32,.04,.68,.96) infinite; }
+    .boost-motes { position: absolute; inset: 0; clip-path: inset(0 0 0 56%); }
     .boost-motes span { position: absolute; left: var(--x); top: var(--y); width: var(--size, 2px); height: var(--size, 2px); border-radius: 50%; background: #FFF1BE; box-shadow: 0 0 9px 2px #E9C77A88; animation: boostMote var(--duration, 7s) ease-in-out var(--delay, 0s) infinite; }
     .boost-motes span:nth-child(1) { --x: 7%; --y: 24%; --delay: -1s; --duration: 6s; }.boost-motes span:nth-child(2) { --x: 14%; --y: 73%; --delay: -5s; --size: 3px; }.boost-motes span:nth-child(3) { --x: 29%; --y: 17%; --delay: -3s; }.boost-motes span:nth-child(4) { --x: 39%; --y: 79%; --delay: -6s; --duration: 9s; }.boost-motes span:nth-child(5) { --x: 52%; --y: 35%; --delay: -2s; --size: 3px; }.boost-motes span:nth-child(6) { --x: 61%; --y: 14%; --delay: -7s; }.boost-motes span:nth-child(7) { --x: 75%; --y: 64%; --delay: -4s; --duration: 8s; }.boost-motes span:nth-child(8) { --x: 86%; --y: 27%; --delay: -2s; --size: 3px; }.boost-motes span:nth-child(9) { --x: 92%; --y: 81%; --delay: -5s; }.boost-motes span:nth-child(10) { --x: 47%; --y: 56%; --delay: -8s; --duration: 10s; }
     .boost-spark { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #FFF3BD; box-shadow: 0 0 12px 2px #F2D78799; animation: boostSpark 9s ease-in-out infinite; }
-    .boost-spark-one { top: 86px; left: 45%; }
+    .boost-spark-one { top: 86px; left: 72%; }
     .boost-spark-two { top: 38px; left: 80%; animation-delay: -3s; }
-    .boost-spark-three { top: 190px; left: 24%; animation-delay: -6s; }
-    .boost-hero-layout { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0,1fr) 185px; gap: 18px; min-height: 196px; align-items: center; }
-    .boost-hero-title { color: #FAF4E7; text-shadow: 0 2px 20px #D3B67417; }
+    .boost-spark-three { top: 190px; left: 84%; animation-delay: -6s; }
+    .boost-hero-corner { position: absolute; width: 39px; height: 39px; border-color: #E9CF8E7A; border-style: solid; filter: drop-shadow(0 0 6px #DFB86252); }
+    .boost-hero-corner::after { content: ""; position: absolute; width: 4px; height: 4px; border: 1px solid #FFF1BD; background: #8B6D35; transform: rotate(45deg); box-shadow: 0 0 8px #F5D783; }
+    .boost-hero-corner-tl { display: none; }
+    .boost-hero-corner-tr { top: 18px; right: 18px; border-width: 1px 1px 0 0; }.boost-hero-corner-tr::after { top: -3px; right: -3px; }
+    .boost-hero-corner-bl { display: none; }
+    .boost-hero-corner-br { bottom: 18px; right: 18px; border-width: 0 1px 1px 0; }.boost-hero-corner-br::after { bottom: -3px; right: -3px; }
+    .boost-hero-layout { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: 28px; min-height: 236px; align-items: center; }
+    .boost-hero-copy { position: relative; }
+    .boost-hero-title { max-width: 680px; color: #FAF4E7; font-weight: 700; letter-spacing: -.025em; background: linear-gradient(105deg, #FAF4E7 0%, #FAF4E7 37%, #F5DBA0 50%, #FAF4E7 63%, #FAF4E7 100%); background-size: 240% 100%; background-position: 100% center; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
     .boost-hero-copy > * { animation: boostReveal 720ms cubic-bezier(.2,.8,.2,1) both; }
     .boost-hero-copy > :nth-child(2) { animation-delay: 90ms; }
     .boost-hero-copy > :nth-child(3) { animation-delay: 180ms; }
     .boost-hero-copy > :nth-child(4) { animation-delay: 270ms; }
+    .boost-hero-copy > .boost-hero-title { animation: boostReveal 720ms cubic-bezier(.2,.8,.2,1) 90ms both, boostTitleGlint 11s ease-in-out infinite; }
     .boost-kicker { display: flex; align-items: center; gap: 9px; color: #D8BD79; font: 700 10px/1.3 ui-monospace, monospace; letter-spacing: .18em; }
-    .boost-kicker-dot { width: 6px; height: 6px; border-radius: 50%; background: #EBD28A; box-shadow: 0 0 10px #F6DA85; }
-    .boost-kicker-divider { width: 18px; height: 1px; background: #8A754D; }
-    .boost-hero-side { display: flex; height: 100%; flex-direction: column; align-items: flex-end; justify-content: space-between; }
-    .boost-hero-emblem { position: relative; width: 164px; height: 164px; display: grid; place-items: center; overflow: clip; contain: paint; margin: -3px 8px 0 0; }
-    .boost-emblem-halo { position: absolute; inset: 7px; border-radius: 50%; background: radial-gradient(circle, #ECC9773D 0%, #B9943924 30%, transparent 66%); filter: blur(10px); animation: boostBreathe 5s ease-in-out infinite; }
-    .boost-emblem-sweep { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 64%, #FFF2BB 74%, transparent 81%); -webkit-mask: radial-gradient(transparent 61%, #000 63% 66%, transparent 68%); mask: radial-gradient(transparent 61%, #000 63% 66%, transparent 68%); filter: drop-shadow(0 0 10px #FFE6A0); animation: boostOrbit 8s linear infinite; }
-    .boost-emblem-orbit { position: absolute; border-radius: 50%; animation: boostOrbit 24s linear infinite; }
-    .boost-emblem-orbit-outer { inset: 9px; border: 1px solid #B8955370; border-top-color: #F8E3A8; border-bottom-color: #F8E3A8; box-shadow: 0 0 18px #D5B46D30, inset 0 0 18px #D5B46D1A; }
-    .boost-emblem-orbit-outer::before, .boost-emblem-orbit-outer::after { content: ""; position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #FFF1BA; box-shadow: 0 0 9px #FFF1BA; }
-    .boost-emblem-orbit-outer::before { top: 14px; left: 18px; }.boost-emblem-orbit-outer::after { bottom: 14px; right: 18px; }
-    .boost-emblem-orbit-inner { inset: 28px; border: 1px dashed #CFB16E66; animation-direction: reverse; animation-duration: 16s; }
-    .boost-emblem-ripple { position: absolute; inset: 43px; border: 1px solid #FBE4A7A0; border-radius: 50%; box-shadow: 0 0 14px #EAC9786B; animation: boostRipple 4s ease-out infinite; }.boost-emblem-ripple-two { animation-delay: -2s; }
+    .boost-kicker-dot { width: 5px; height: 5px; border-radius: 50%; background: #D8BD79; }
+    .boost-hero-side { position: relative; display: flex; height: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+    .boost-cycle { --boost-packet-radius: -66px; position: relative; display: grid; width: 222px; height: 222px; flex: none; place-items: center; border-radius: 50%; background: radial-gradient(circle, #BD9B5038 0%, #1828314D 30%, transparent 68%); box-shadow: 0 0 75px -40px #D7B86C99; }
+    .boost-cycle::before { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: conic-gradient(from 18deg, transparent 0 22%, #D8B66C87 24%, transparent 27% 56%, #E6D09661 59%, transparent 62% 100%); -webkit-mask: radial-gradient(transparent 70%, #000 72% 73%, transparent 75%); mask: radial-gradient(transparent 70%, #000 72% 73%, transparent 75%); animation: boostOrbit 22s linear infinite; }
+    .boost-cycle-track { position: absolute; border-radius: 50%; }
+    .boost-cycle-track-outer { inset: 11px; border: 1px dashed #CDB06E63; animation: boostOrbit 32s linear infinite reverse; }
+    .boost-cycle-track-inner { inset: 42px; border: 1px solid #B5975D66; box-shadow: 0 0 30px #E9C77829, inset 0 0 24px #E9C77812; }
+    .boost-cycle-sweep { position: absolute; inset: 16px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 72%, #FFE9AF 79%, transparent 86%); -webkit-mask: radial-gradient(transparent 86%, #000 88% 89%, transparent 91%); mask: radial-gradient(transparent 86%, #000 88% 89%, transparent 91%); filter: drop-shadow(0 0 7px #FFE9AF); animation: boostOrbit 8s linear infinite; }
+    .boost-cycle-packet { position: absolute; z-index: 2; top: calc(50% - 3px); left: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: #FFF0BE; box-shadow: 0 0 9px 2px #F2D17EA6, 0 0 24px #F2D17E80; animation: boostPacketTravel 5.4s linear infinite; }
+    .boost-cycle-packet-two { animation-delay: -1.8s; }
+    .boost-cycle-packet-three { animation-delay: -3.6s; }
+    .boost-cycle-trace { position: absolute; z-index: 2; top: 15px; left: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: #FFF3C7; box-shadow: 0 0 13px 3px #EFCB79; transform-origin: 3px 96px; animation: boostOrbit 8s linear infinite; }
+    .boost-cycle-trace-two { animation-delay: -4s; opacity: .7; }
+    .boost-cycle-node { position: absolute; z-index: 3; display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid #D6B876; border-radius: 11px; color: #FFE8AA; background: linear-gradient(145deg, #4B3D28, #172027); box-shadow: inset 0 1px 0 #FFF2C178, 0 0 19px #D8B16266; animation: boostNode 5.4s ease-in-out infinite; }
+    .boost-cycle-node::after { content: ""; position: absolute; inset: -6px; border: 1px solid #EACD8299; border-radius: 16px; animation: boostNodeWave 5.4s ease-out infinite; }
+    .boost-cycle-node-bnb { top: 12px; left: 17px; }
+    .boost-cycle-node-token { top: 82px; right: -6px; animation-delay: -1.8s; }.boost-cycle-node-token::after { animation-delay: -1.8s; }
+    .boost-cycle-node-output { bottom: 10px; left: 42px; animation-delay: -3.6s; }.boost-cycle-node-output::after { animation-delay: -3.6s; }
+    .boost-cycle-center { position: relative; z-index: 2; display: grid; width: 96px; height: 96px; place-items: center; border: 1px solid #DCC27D8C; border-radius: 50%; background: radial-gradient(circle at 40% 32%, #B78D4A64, #131E26 67%); box-shadow: inset 0 1px 0 #FFF2C16E, 0 0 37px #E3BC6B5C; animation: boostBreathe 5.4s ease-in-out infinite; }
+    .boost-cycle-center::before { content: ""; position: absolute; inset: -10px; border: 1px solid #E9C77B75; border-radius: 50%; box-shadow: 0 0 17px #EAC67466; animation: boostCoreWave 5.4s ease-out infinite; }
     .boost-emblem-core { position: relative; z-index: 2; display: block; width: 74px; height: 74px; border: 1px solid #E2C275A8; border-radius: 50%; color: #FFE5A0; background: radial-gradient(circle at 35% 28%, #725B3699, #121A22 66%); box-shadow: inset 0 1px 0 #FFF4C280, 0 0 32px #DDBB6750; }
     .boost-wing { position: absolute; background: linear-gradient(145deg, #FFF4C9DD, #D6A953C9 45%, #7A602F69); border: 1px solid #FFE6A5B8; box-shadow: inset 0 1px 0 #FFFFFF83, 0 0 11px #E8C57471; }
     .boost-wing-upper-left { top: 14px; left: 13px; width: 24px; height: 29px; border-radius: 85% 13% 75% 13%; transform-origin: right bottom; animation: boostWingLeft 3.4s ease-in-out infinite; }
@@ -1620,27 +1936,78 @@ function BoostMotionStyles() {
     .boost-hero-steps::before { content: ""; position: absolute; bottom: 0; left: 0; width: min(100%, 330px); height: 1px; background: linear-gradient(90deg, #D9BD6D8C, #665B47 70%, transparent); }
     .boost-hero-steps::after { content: ""; position: absolute; bottom: -2px; left: 0; width: 5px; height: 5px; border-radius: 50%; background: #FFF2C2; box-shadow: 0 0 9px 3px #F5D884A3; animation: boostFlow 4.8s cubic-bezier(.3,0,.7,1) infinite; }
     .boost-hero-steps svg { color: #D7B964; animation: boostChevron 2.4s ease-in-out infinite; }.boost-hero-steps svg:nth-of-type(2) { animation-delay: .8s; }
-    .boost-content { background: linear-gradient(180deg, #0D1117 0%, #090C10 100%); }
-    .flap-boost-workspace { border: 1px solid #353B42; background: linear-gradient(145deg, #111923, #0B1017 46%, #0A0D11); box-shadow: inset 0 1px 0 #FFFFFF0A; }
-    .boost-workspace-header { position: relative; overflow: hidden; border-bottom: 1px solid #343A3E; background: linear-gradient(90deg, #17202A99, #10151B80); }
+    .boost-content { background: radial-gradient(ellipse at 3% 0, #B8954220, transparent 33%), linear-gradient(180deg, #0D1117 0%, #090C10 100%); }
+    .boost-view-tabs { background: transparent; }
+    .boost-view-tab { position: relative; display: flex; min-width: 0; min-height: 78px; align-items: center; gap: 16px; overflow: hidden; border: 1px solid #435153; border-radius: 14px 4px 14px 4px; padding: 14px 18px; color: #C5CECB; background: linear-gradient(112deg, #14232B, #0B1219 70%); text-align: left; transition: color 220ms ease, border-color 220ms ease, background 220ms ease, box-shadow 220ms ease, transform 220ms ease; }
+    .boost-view-tab::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; opacity: 0; background: linear-gradient(#FFF0BB, #B38A40); box-shadow: 0 0 15px #E5C16A; transition: opacity 220ms ease; }
+    .boost-view-tab::after { content: ""; position: absolute; right: 100%; bottom: 0; width: 38%; height: 2px; opacity: 0; background: linear-gradient(90deg, transparent, #FFE7A7, transparent); box-shadow: 0 0 12px #E8C474; pointer-events: none; }
+    .boost-view-tab:hover { color: #FFE6AE; border-color: #A68D5A; transform: translateY(-2px); }
+    .boost-view-tab[aria-pressed="true"] { color: #FFF0CB; border-color: #A48B59; background: linear-gradient(112deg, #3C3526, #1D2A2E 65%, #111B22); box-shadow: inset 0 1px 0 #F5D89445, 0 15px 29px -26px #E1BE6D; }
+    .boost-view-tab[aria-pressed="true"]::before { opacity: 1; }
+    .boost-view-tab[aria-pressed="true"]::after { animation: boostTabRail 7s ease-in-out infinite; }
+    .boost-view-tab-index { flex: none; color: #728284; font: 700 25px/1 ui-monospace, monospace; letter-spacing: -.08em; transition: color 220ms ease; }
+    .boost-view-tab[aria-pressed="true"] .boost-view-tab-index { color: #F0D28B; text-shadow: 0 0 17px #E8C47670; }
+    .boost-view-tab-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+    .boost-view-tab-copy strong { overflow: hidden; font-size: 16px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+    .boost-view-tab-copy small { color: #889C9D; font-size: 11px; line-height: 1.2; }
+    .boost-view-tab[aria-pressed="true"] .boost-view-tab-copy small { color: #C1BAA3; }
+    .boost-view-tab-arrow { flex: none; color: #7E9291; transition: color 220ms ease, transform 220ms ease; }
+    .boost-view-tab:hover .boost-view-tab-arrow, .boost-view-tab[aria-pressed="true"] .boost-view-tab-arrow { color: #EED28F; transform: translateX(3px); }
+    .boost-detail-tabs .boost-view-tab { min-height: 44px; justify-content: center; border: 0; border-radius: 8px; padding: 10px; background: transparent; text-align: center; }
+    .boost-detail-tabs .boost-view-tab::before { display: none; }
+    .boost-detail-tabs .boost-view-tab:hover { transform: none; }
+    .boost-detail-tabs .boost-view-tab[aria-pressed="true"] { background: linear-gradient(125deg, #433722, #21252A); box-shadow: inset 0 1px 0 #F5D89455; }
+    .boost-management { min-width: 0; }
+    .boost-plaza-filter, .boost-token { min-height: 40px; }
+    .boost-view-tab:focus-visible, .boost-plaza-filter:focus-visible, .boost-token:focus-visible, .boost-task:focus-visible { outline: 2px solid #E7CC87; outline-offset: 2px; }
+    .boost-plaza { position: relative; isolation: isolate; overflow: hidden; border-color: #4B514D; background: radial-gradient(circle at 96% -18%, #C6A15A24, transparent 42%), linear-gradient(150deg, #111A20, #0B1117 72%); box-shadow: inset 0 1px 0 #F7DC9D22, 0 24px 55px -44px #D0A95465; }
+    .boost-plaza::before { content: ""; position: absolute; pointer-events: none; top: -138px; right: -112px; width: 260px; height: 260px; border: 1px solid #D8BC7224; border-radius: 50%; box-shadow: 0 0 0 30px #D8BC7205; }
+    .boost-plaza::after { content: ""; position: absolute; pointer-events: none; top: 0; left: -35%; width: 35%; height: 1px; background: linear-gradient(90deg, transparent, #FFE4A899, transparent); box-shadow: 0 0 14px #E9C77477; animation: boostPlazaRail 13s ease-in-out infinite; }
+    .boost-plaza-network { border: 1px solid #8B7650; color: #F4DEA9; background: #2B281F; }
+    .boost-plaza-filter { border: 1px solid #66573C; color: #B9B6AA; background: #111820; transition: border-color 200ms ease, color 200ms ease, background 200ms ease; }
+    .boost-plaza-filter:hover { color: #F4DAA2; border-color: #B69A5B; }.boost-plaza-filter[aria-pressed="true"] { border-color: #E3C781; color: #201B12; background: #DCC27E; }
+    .boost-plaza-card { position: relative; isolation: isolate; overflow: hidden; border-color: #39494B; background: linear-gradient(110deg, #142027, #0E171D 72%); transition: border-color 220ms ease, background 220ms ease, transform 300ms cubic-bezier(.2,.8,.2,1), box-shadow 300ms ease; animation: boostRowArrive 620ms cubic-bezier(.18,.85,.24,1) backwards; }
+    .boost-plaza-card::after { content: ""; position: absolute; pointer-events: none; z-index: 0; top: -30%; bottom: -30%; left: -45%; width: 30%; transform: skewX(-16deg); background: linear-gradient(90deg, transparent, #EDD69A14, transparent); }
+    .boost-plaza-card > * { position: relative; z-index: 1; }
+    .boost-plaza-row { display: grid; grid-template-columns: minmax(210px, 1.6fr) repeat(3, minmax(112px, .75fr)) auto; align-items: center; gap: 20px; }
+    .boost-plaza-project { border-left: 2px solid #D6B76E; padding-left: 13px; }
+    .boost-plaza-fact { min-width: 0; }
+    .boost-plaza-fact p { color: #9FA9A5; font-size: 11px; line-height: 1.35; }
+    .boost-plaza-fact strong { display: block; overflow: hidden; margin-top: 5px; color: #F5E8CA; font: 600 13px/1.35 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .boost-plaza-row-status { display: flex; justify-content: flex-end; }
+    @media (max-width: 1023px) { .boost-plaza-row { grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, .7fr)); gap: 14px; } .boost-plaza-row-status { grid-column: 1 / -1; justify-content: flex-start; } }
+    @media (max-width: 639px) { .boost-plaza-row { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; } .boost-plaza-project { grid-column: 1 / -1; } .boost-plaza-fact strong { font-size: 11px; } .boost-plaza-row-status { grid-column: 1 / -1; } }
+    .boost-plaza-status { border: 1px solid #645A4A; color: #BDB6A7; background: #191B1D; }
+    .boost-plaza-status-live { position: relative; border-color: #7EB7A6; color: #BBF1DC; background: #16332F; box-shadow: 0 0 18px -11px #8FE4BE; }
+    .boost-plaza-status-live::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; vertical-align: 2px; background: #A5F3CB; box-shadow: 0 0 8px #A5F3CB; animation: boostStatusBreathe 3s ease-in-out infinite; }
+    .boost-plaza-status-live::after { content: ""; position: absolute; inset: -3px; border: 1px solid #9BD8BF6B; border-radius: inherit; animation: boostLiveRing 4.5s ease-out infinite; }
+    .boost-plaza-empty { border-color: #4B574F; background: linear-gradient(120deg, #142128, #10191E); }
+    .boost-plaza-empty-icon { border: 1px solid #796849; color: #E4CB8D; background: #2B2A22; }
+    @media (hover: hover) { .boost-plaza-card:hover { border-color: #B69A5D; background: linear-gradient(110deg, #19282D, #121C21 72%); transform: translateY(-2px); box-shadow: 0 14px 28px -22px #D8B46B75; } .boost-plaza-card:hover::after { animation: boostCardWash 850ms ease-out both; } }
+    .flap-boost-workspace { border: 1px solid #3F4A49; background: linear-gradient(155deg, #111A21, #0B1117 70%); box-shadow: inset 0 1px 0 #FCE8AA16, 0 20px 48px -38px #CAA65F58; }
+    .flap-boost-workspace > * { position: relative; z-index: 1; }
+    .boost-workspace-header { position: relative; overflow: hidden; border-bottom: 1px solid #5D523E; background: linear-gradient(90deg, #17202A99, #10151B80); }
+    .boost-workspace-header::before { content: ""; pointer-events: none; position: absolute; inset: 0; opacity: .46; background: repeating-linear-gradient(115deg, transparent 0 30px, #E7D29808 31px 32px, transparent 33px 62px), radial-gradient(circle at 14% 50%, #E5BC5D24, transparent 26%); }
     .boost-workspace-header::after { content: ""; pointer-events: none; position: absolute; bottom: 0; left: -38%; width: 38%; height: 1px; background: linear-gradient(90deg, transparent, #FCE3A6, transparent); box-shadow: 0 0 12px #E8C570; animation: boostRail 9s ease-in-out infinite; }
     .boost-workspace-icon { border: 1px solid #8E774B88; color: #E7CC87; background: linear-gradient(145deg, #352D20, #151A1F); box-shadow: inset 0 1px 0 #F9DFA329; }
     .boost-workspace-icon { animation: boostIconBreathe 7s ease-in-out infinite; }
     .boost-motion-toggle { color: #B9B2A2; }.boost-motion-toggle:hover { color: #FFE3A0; background: #51432935; }.boost-motion-toggle[aria-pressed="true"] { color: #F0D18A; background: #54442935; }
-    .boost-empty { position: relative; isolation: isolate; overflow: hidden; border: 1px solid #3D4144; background: radial-gradient(circle at 6% 50%, #C59B3520, transparent 34%), linear-gradient(110deg, #121B25, #0A1017); box-shadow: inset 0 1px 0 #FFF4D00C; }
+    .boost-empty { position: relative; isolation: isolate; overflow: hidden; border: 1px solid #756244; background: radial-gradient(circle at 6% 50%, #C59B3530, transparent 34%), repeating-linear-gradient(135deg, transparent 0 31px, #E5C57608 32px 33px, transparent 34px 64px), linear-gradient(110deg, #121B25, #0A1017); box-shadow: inset 0 1px 0 #FFF4D029, inset 0 0 0 5px #CFAF6907; }
     .boost-empty::before { content: ""; position: absolute; inset: -70% -20%; z-index: 0; background: radial-gradient(ellipse at 35% 50%, #D9B4651C, transparent 43%); animation: boostCloud 11s ease-in-out infinite alternate; }
     .boost-empty::after { content: ""; position: absolute; left: -40%; top: 0; bottom: 0; width: 25%; transform: skewX(-25deg); background: linear-gradient(90deg, transparent, #FFE9B016, transparent); animation: boostEmptyGlint 9s ease-in-out infinite; }
     .boost-empty > * { position: relative; z-index: 1; }
-    .boost-empty-icon { border: 1px solid #A5885180; color: #EBCF8B; background: linear-gradient(145deg, #3B3123, #141B23); box-shadow: inset 0 1px 0 #FFF0BB40, 0 0 24px #DAB2571A; animation: boostIconBreathe 4.5s ease-in-out infinite; }
-    .flap-boost-form-reveal { border: 1px solid #746142; background: linear-gradient(150deg, #15202B, #0E141B 50%, #17150F); box-shadow: inset 0 1px 0 #FCE5A42B, 0 22px 55px -42px #CFAF67A0; animation: boostEnter 420ms cubic-bezier(.16,1,.3,1) both; }
-    .boost-vault-panel-head { position: relative; isolation: isolate; overflow: hidden; background: radial-gradient(ellipse at 80% 43%, #C9A64E26, transparent 38%), linear-gradient(110deg, #172631, #111B23 57%, #292214); }
+    .boost-empty-seal { position: relative; display: grid; place-items: center; width: 102px; height: 102px; border-radius: 50%; background: radial-gradient(circle, #DAAF4730, transparent 68%); }
+    .boost-empty-seal-ring { position: absolute; border-radius: 50%; border: 1px solid #DBBC7275; }
+    .boost-empty-seal-ring-outer { inset: 3px; border-style: dashed; animation: boostOrbit 24s linear infinite; }
+    .boost-empty-seal-ring-inner { inset: 14px; border-color: #E5C77D9C; border-top-color: #FFF1BE; border-bottom-color: #FFF1BE; box-shadow: 0 0 18px #E6C5754D, inset 0 0 16px #E6C57533; animation: boostOrbit 13s linear infinite reverse; }
+    .boost-empty-seal-ray { position: absolute; top: 50%; left: -13px; width: 128px; height: 1px; background: linear-gradient(90deg, transparent, #E9CF8A95 15%, transparent 29% 71%, #E9CF8A95 85%, transparent); }
+    .boost-empty-seal-ray-two { transform: rotate(90deg); }
+    .boost-empty-icon { position: relative; z-index: 1; border: 1px solid #C4A668; color: #F4DB99; background: linear-gradient(145deg, #6C5430, #1B2228 65%); box-shadow: inset 0 1px 0 #FFF0BB85, 0 0 24px #DAB25769; animation: boostIconBreathe 4.5s ease-in-out infinite; }
+    .flap-boost-form-reveal { border: 1px solid #43524F; background: #0C141A; box-shadow: inset 0 1px 0 #FCE5A416; animation: boostEnter 420ms cubic-bezier(.16,1,.3,1) both; }
+    .boost-vault-panel-head { position: relative; isolation: isolate; overflow: hidden; background: linear-gradient(90deg, #D8BE7F23 1px, transparent 1px) 14px 0 / 1px 100% no-repeat, radial-gradient(ellipse at 80% 43%, #C9A64E26, transparent 38%), linear-gradient(110deg, #172631, #111B23 57%, #292214); }
     .boost-vault-panel-head::before { content: ""; pointer-events: none; position: absolute; inset: 0; opacity: .35; background-image: linear-gradient(#E4D2A20C 1px, transparent 1px), linear-gradient(90deg, #E4D2A20C 1px, transparent 1px); background-size: 19px 19px; mask-image: linear-gradient(90deg, transparent, #000 50%, #000); }
     .boost-vault-panel-head::after { content: ""; pointer-events: none; position: absolute; bottom: 0; left: -36%; width: 36%; height: 1px; background: linear-gradient(90deg, transparent, #FFF1BE, transparent); box-shadow: 0 0 12px #F1D386; animation: boostRail 6.5s ease-in-out infinite; }
     .boost-vault-eyebrow { text-shadow: 0 0 14px #E6C5766B; }
-    .boost-vault-sequence span { width: 4px; height: 4px; border-radius: 50%; background: #F2D693; box-shadow: 0 0 8px #E7C673; animation: boostSequence 5.4s ease-in-out infinite; }
-    .boost-vault-sequence span:nth-of-type(2) { animation-delay: .35s; }.boost-vault-sequence span:nth-of-type(3) { animation-delay: .7s; }
-    .boost-vault-sequence i { width: 24px; height: 1px; background: linear-gradient(90deg, #E4C57E8C, #E4C57E32); transform-origin: left; animation: boostLink 5.4s ease-in-out infinite; }
-    .boost-vault-sequence i:nth-of-type(2) { animation-delay: .35s; }
     .boost-route-preview { position: relative; isolation: isolate; border: 1px solid #60553E; background: radial-gradient(ellipse at 85% 12%, #BD9A4C1F, transparent 48%), linear-gradient(110deg, #13202A, #0C161E 52%, #1A1B17); box-shadow: inset 0 1px 0 #FFF2C41B, 0 16px 35px -30px #D6B46569; }
     .boost-route-preview::before { content: ""; pointer-events: none; position: absolute; inset: 0; z-index: 0; opacity: .22; background-image: linear-gradient(#DCC48E0B 1px, transparent 1px), linear-gradient(90deg, #DCC48E0B 1px, transparent 1px); background-size: 20px 20px; mask-image: linear-gradient(90deg, transparent, #000); }
     .boost-route-preview::after { content: ""; pointer-events: none; position: absolute; top: 0; left: -35%; width: 35%; height: 1px; background: linear-gradient(90deg, transparent, #FFE4A5, transparent); box-shadow: 0 0 9px #DFB963; animation: boostRail 10s ease-in-out infinite; }
@@ -1652,19 +2019,12 @@ function BoostMotionStyles() {
     .boost-route-link { position: relative; height: 1px; background: linear-gradient(90deg, #806D4A, #DFC983); }
     .boost-route-link i { position: absolute; top: -2px; left: 0; width: 5px; height: 5px; border-radius: 50%; background: #FFE7A7; box-shadow: 0 0 8px 2px #E1C17472; animation: boostRouteTravel 4.8s ease-in-out infinite; }
     .boost-route-link-late i { animation-delay: -2.4s; }
-    .boost-vault-visual { position: relative; width: 118px; height: 90px; margin-right: 6px; }
-    .boost-vault-visual-grid { position: absolute; inset: 3px 15px; border-radius: 50%; background: radial-gradient(circle, #ECD08330 0, #B8953A10 44%, transparent 67%); filter: blur(8px); animation: boostBreathe 4.5s ease-in-out infinite; }
-    .boost-vault-ring { position: absolute; border-radius: 50%; border: 1px solid #CDB06C82; box-shadow: 0 0 16px #D6AF5266, inset 0 0 12px #D6AF5233; }
-    .boost-vault-ring-outer { inset: 3px 16px; border-top-color: #FFF0BC; border-bottom-color: #FFF0BC; animation: boostOrbit 11s linear infinite; }
-    .boost-vault-ring-inner { inset: 16px 29px; border-style: dashed; border-color: #E5C986A8; animation: boostOrbit 14s linear infinite reverse; }
-    .boost-vault-visual-core { position: absolute; inset: 24px 37px; display: grid; place-items: center; border: 1px solid #F9DFA7D9; border-radius: 12px; color: #FFF1C5; background: linear-gradient(145deg, #806538, #1D2A2D 65%); box-shadow: inset 0 1px 0 #FFF7D88A, 0 0 21px #E9BD6273; animation: boostIconBreathe 3s ease-in-out infinite; }
-    .boost-vault-beacon { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #FFF2C9; box-shadow: 0 0 9px 3px #EEC970A8; animation: boostSignal 2.6s ease-out infinite; }
-    .boost-vault-beacon-one { top: 8px; left: 39px; }.boost-vault-beacon-two { bottom: 9px; right: 39px; animation-delay: -1.3s; }
-    .boost-form-step { position: relative; overflow: hidden; border-color: #3D4344 !important; background: linear-gradient(135deg, #101922, #0C1219) !important; box-shadow: inset 0 1px 0 #FFFFFF09; }
-    .boost-form-step::before { content: ""; position: absolute; pointer-events: none; top: 0; left: -50%; width: 50%; height: 1px; background: linear-gradient(90deg, transparent, #F4DA9A, transparent); box-shadow: 0 0 11px #E9C87B; animation: boostStepRail 8s ease-in-out infinite; }
+    .boost-form-step { position: relative; overflow: hidden; border-color: #34464A !important; background: linear-gradient(135deg, #111B22, #0D151B) !important; box-shadow: inset 0 1px 0 #FFE3A716; }
+    .boost-form-step::before { content: ""; position: absolute; pointer-events: none; top: 0; left: -50%; width: 50%; height: 1px; opacity: 0; background: linear-gradient(90deg, transparent, #F4DA9A, transparent); box-shadow: 0 0 11px #E9C87B; animation: boostStepRail 8s ease-in-out infinite; }
     .boost-form-step::after { content: ""; pointer-events: none; position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at 0 0, #E2BF6A17, transparent 38%); transition: opacity 300ms ease; }
     .boost-form-step:nth-child(2)::before { animation-delay: -2.7s; }.boost-form-step:nth-child(3)::before { animation-delay: -5.4s; }
     .boost-form-step:focus-within { border-color: #917A4D !important; box-shadow: inset 0 1px 0 #FFE7A028, 0 0 28px -21px #E7C570; }
+    .boost-form-step:focus-within::before { opacity: 1; }
     .boost-form-step:focus-within::after { opacity: 1; }
     .boost-step-heading { position: relative; z-index: 1; }
     .boost-step-heading > span:nth-child(2) { transform-origin: left; animation: boostStepLink 700ms cubic-bezier(.2,.8,.2,1) both; }
@@ -1718,8 +2078,6 @@ function BoostMotionStyles() {
     @keyframes boostSelect { from { transform: translateY(2px) scale(.985); } to { transform: translateY(0) scale(1); } }
     @keyframes boostConfirmIn { from { opacity: 0; transform: translateY(6px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes boostConfirmSweep { from { opacity: 0; transform: translateX(0) skewX(-20deg); } 30% { opacity: 1; } to { opacity: 0; transform: translateX(400%) skewX(-20deg); } }
-    @keyframes boostSequence { 0%,20%,100% { opacity: .35; transform: scale(.7); } 35%,52% { opacity: 1; transform: scale(1.2); } }
-    @keyframes boostLink { 0%,20%,100% { opacity: .35; transform: scaleX(.3); } 35%,60% { opacity: .9; transform: scaleX(1); } }
     @keyframes boostRouteTravel { 0%,12%,100% { opacity: 0; transform: translateX(0) scale(.6); } 20% { opacity: .85; } 68% { opacity: .85; transform: translateX(var(--boost-route-distance, 14px)) scale(1); } 76% { opacity: 0; transform: translateX(var(--boost-route-distance, 14px)) scale(.6); } }
     @keyframes boostStepLink { from { opacity: 0; transform: scaleX(.2); } to { opacity: 1; transform: scaleX(1); } }
     @keyframes boostIndex { 0%,28%,100% { color: #BFA976; text-shadow: 0 0 0 transparent; } 35%,50% { color: #FFE4A4; text-shadow: 0 0 9px #EAC8798C; } }
@@ -1730,9 +2088,19 @@ function BoostMotionStyles() {
     @media (max-width: 639px) { .boost-route-node { grid-template-columns: 18px minmax(0,1fr); grid-template-rows: 18px auto; column-gap: 3px; padding: 5px; } .boost-route-icon { grid-row: 1; width: 18px; height: 18px; border-radius: 5px; } .boost-route-icon svg { width: 11px; height: 11px; } .boost-route-caption { font-size: 9px; } .boost-route-value { grid-column: 1 / -1; font-size: 10px; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; } }
     @keyframes boostOrbit { to { transform: rotate(360deg); } }
     @keyframes boostBreathe { 0%,100% { opacity: .66; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.07); } }
+    @keyframes boostPacketTravel { 0% { opacity: 0; transform: rotate(0deg) translateY(var(--boost-packet-radius)) scale(.5); } 10%,78% { opacity: .9; } 92%,100% { opacity: 0; transform: rotate(360deg) translateY(var(--boost-packet-radius)) scale(1); } }
+    @keyframes boostCoreWave { 0%,12% { opacity: 0; transform: scale(.82); } 22% { opacity: .7; } 52%,100% { opacity: 0; transform: scale(1.55); } }
+    @keyframes boostNode { 0%,13%,42%,100% { transform: scale(1); box-shadow: inset 0 1px 0 #FFF2C178, 0 0 14px #D8B1624D; } 22% { transform: scale(1.11); box-shadow: inset 0 1px 0 #FFF2C1A0, 0 0 28px #E5C177B3; } }
+    @keyframes boostNodeWave { 0%,14% { opacity: 0; transform: scale(.75); } 22% { opacity: .7; } 45%,100% { opacity: 0; transform: scale(1.45); } }
+    @keyframes boostTitleGlint { 0%,62% { background-position: 100% center; } 86%,100% { background-position: -100% center; } }
+    @keyframes boostCurrentFlow { 0%,13% { opacity: 0; transform: translateX(-110%); } 25%,71% { opacity: .85; } 88%,100% { opacity: 0; transform: translateX(680%); } }
+    @keyframes boostTabRail { 0%,48% { opacity: 0; transform: translateX(0); } 57% { opacity: .95; } 80%,100% { opacity: 0; transform: translateX(360%); } }
+    @keyframes boostPlazaRail { 0%,56% { opacity: 0; transform: translateX(0); } 64% { opacity: .8; } 91%,100% { opacity: 0; transform: translateX(390%); } }
+    @keyframes boostRowArrive { from { opacity: 0; transform: translateY(12px) scale(.992); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes boostCardWash { from { opacity: 0; transform: translateX(0) skewX(-16deg); } 30% { opacity: 1; } to { opacity: 0; transform: translateX(480%) skewX(-16deg); } }
+    @keyframes boostLiveRing { 0%,60%,100% { opacity: 0; transform: scale(.92); } 68% { opacity: .65; } 86% { opacity: 0; transform: scale(1.2); } }
     @keyframes boostBeam { 0%,12% { opacity: 0; transform: translate3d(0,0,0) rotate(-18deg); } 26% { opacity: .75; } 62% { opacity: .5; } 78%,100% { opacity: 0; transform: translate3d(300%,0,0) rotate(-18deg); } }
     @keyframes boostMote { 0%,100% { opacity: 0; transform: translate3d(0,15px,0) scale(.6); } 28%,60% { opacity: .85; } 78% { opacity: .3; transform: translate3d(18px,-24px,0) scale(1.2); } }
-    @keyframes boostRipple { 0% { opacity: .55; transform: scale(.65); } 85%,100% { opacity: 0; transform: scale(2.1); } }
     @keyframes boostWingLeft { 0%,100% { transform: rotate(-32deg) scaleX(.95); } 50% { transform: rotate(-14deg) scaleX(.7); } }
     @keyframes boostWingRight { 0%,100% { transform: rotate(32deg) scaleX(.95); } 50% { transform: rotate(14deg) scaleX(.7); } }
     @keyframes boostWingLowerLeft { 0%,100% { transform: rotate(22deg) scaleX(.95); } 50% { transform: rotate(8deg) scaleX(.7); } }
@@ -1752,7 +2120,50 @@ function BoostMotionStyles() {
     @keyframes boostScan { 0%, 15% { opacity: 0; transform: translateX(-110%); } 25%,75% { opacity: .8; } 90%,100% { opacity: 0; transform: translateX(450%); } }
     @keyframes boostShine { 0%,65% { transform: translateX(0) skewX(-20deg); } 88%,100% { transform: translateX(650%) skewX(-20deg); } }
     @media (hover: hover) { .boost-cta:not(:disabled):hover, .boost-token:hover { transform: translateY(-2px); } .boost-choice:hover, .boost-task:hover { border-color: #A58D60; box-shadow: 0 0 28px -22px #E2C575; } }
-    @media (max-width: 639px) { .boost-hero-layout { position: relative; display: block; min-height: 178px; } .boost-hero-copy { position: relative; z-index: 2; } .boost-hero-title { font-size: 28px; } .boost-hero-side { position: absolute; inset: 0; z-index: 1; display: block; pointer-events: none; } .boost-hero-side > span { position: absolute; top: auto; right: 0; bottom: 0; } .boost-hero-emblem { position: absolute; right: 4px; bottom: 8px; width: 84px; height: 84px; margin: 0; opacity: .43; } .boost-emblem-core { width: 42px; height: 42px; } .boost-wing-upper-left { top: 6px; left: 4px; width: 16px; height: 19px; }.boost-wing-upper-right { top: 6px; right: 4px; width: 16px; height: 19px; }.boost-wing-lower-left { top: 22px; left: 7px; width: 13px; height: 14px; }.boost-wing-lower-right { top: 22px; right: 7px; width: 13px; height: 14px; }.boost-wing-body { top: 12px; height: 22px; width: 3px; } .boost-emblem-orbit-inner { inset: 14px; } .boost-emblem-ripple { inset: 22px; } .boost-hero-steps { --boost-flow-distance: 225px; gap: 7px; font-size: 10px; } .boost-hero-steps svg { display: none; } .boost-motes span:nth-child(n+7), .boost-atmosphere-beam-two { display: none; } .flap-boost-metrics > * { padding: .5rem .75rem; } .flap-boost-metrics > *:nth-child(3) { border-left: 0; } .boost-aura { opacity: .25; } .boost-choice { min-height: 44px; } .boost-choice > span:last-child { font-size: 11px; white-space: nowrap; } }
+    @media (max-width: 639px) {
+      .boost-hero-layout { grid-template-columns: minmax(0,1fr) 104px; gap: 7px; min-height: 160px; }
+      .boost-hero-title { font-size: 27px; }
+      .boost-hero-description { font-size: 12px; line-height: 1.45; }
+      .boost-hero-steps { --boost-flow-distance: 225px; gap: 7px; font-size: 10px; }
+      .boost-hero-steps svg { display: none; }
+      .boost-hero-side { height: auto; pointer-events: none; }
+      .boost-cycle { --boost-packet-radius: -31px; width: 104px; height: 104px; }
+      .boost-atmosphere-current { opacity: .3; }
+      .boost-cycle-track-outer { inset: 4px; }
+      .boost-cycle-track-inner { inset: 22px; }
+      .boost-cycle-sweep { inset: 7px; }
+      .boost-cycle-trace { top: 5px; width: 4px; height: 4px; transform-origin: 2px 47px; }
+      .boost-cycle-center { width: 47px; height: 47px; }
+      .boost-emblem-core { width: 42px; height: 42px; }
+      .boost-wing-upper-left { top: 6px; left: 4px; width: 16px; height: 19px; }
+      .boost-wing-upper-right { top: 6px; right: 4px; width: 16px; height: 19px; }
+      .boost-wing-lower-left { top: 22px; left: 7px; width: 13px; height: 14px; }
+      .boost-wing-lower-right { top: 22px; right: 7px; width: 13px; height: 14px; }
+      .boost-wing-body { top: 12px; width: 3px; height: 22px; }
+      .boost-cycle-node { width: 22px; height: 22px; border-radius: 6px; }
+      .boost-cycle-node svg { width: 12px; height: 12px; }
+      .boost-cycle-node-bnb { top: 1px; left: 1px; }
+      .boost-cycle-node-token { top: 40px; right: -6px; }
+      .boost-cycle-node-output { bottom: 1px; left: 14px; }
+      .boost-view-tab { min-height: 62px; gap: 8px; padding: 9px 10px; }
+      .boost-view-tab-index { font-size: 20px; }
+      .boost-view-tab-copy strong { font-size: 13px; }
+      .boost-view-tab-copy small { display: none; }
+      .boost-view-tab-arrow { width: 13px; height: 13px; }
+      .boost-hero-corner { width: 20px; height: 20px; opacity: .5; }
+      .boost-hero-corner-tl { display: none; }
+      .boost-hero-corner-tr { top: 16px; right: 16px; }
+      .boost-hero-corner-bl { bottom: 16px; left: 16px; }
+      .boost-hero-corner-br { bottom: 16px; right: 16px; }
+      .boost-empty-seal { width: 92px; height: 92px; }
+      .boost-empty-seal-ray { left: -13px; width: 118px; }
+      .boost-motes span:nth-child(n+7), .boost-atmosphere-beam-two { display: none; }
+      .flap-boost-metrics > * { padding: .5rem .75rem; }
+      .flap-boost-metrics > *:nth-child(3) { border-left: 0; }
+      .boost-aura { opacity: .25; }
+      .boost-choice { min-height: 44px; }
+      .boost-choice > span:last-child { font-size: 11px; white-space: nowrap; }
+    }
     .flap-boost-app[data-motion-paused="true"] *, .flap-boost-app[data-motion-paused="true"] *::before, .flap-boost-app[data-motion-paused="true"] *::after { animation-play-state: paused !important; }
     @media (prefers-reduced-motion: reduce) { .flap-boost-app *, .flap-boost-app *::before, .flap-boost-app *::after { animation: none !important; transition: none !important; } .boost-spark, .boost-motes { display: none; } }
   `}</style>

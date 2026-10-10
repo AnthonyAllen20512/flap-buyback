@@ -1,6 +1,6 @@
 # Flap Buyback
 
-This repository contains the [Flap Boost Mini App UI](./src/vaults/flap-boost/) and its [Solidity contracts and Foundry tests](./contracts/flap-boost/). The UI reads the current BSC testnet Factory at `0x095814ef73e8cdd740ecadd604b61370e3d5343f`. The Solidity code retains BNB Chain mainnet support; the UI manifest has no mainnet Factory address yet.
+This repository contains the [Flap Boost Mini App UI](./src/vaults/flap-boost/) and its [Solidity contracts and Foundry tests](./contracts/flap-boost/). The UI reads the current BSC testnet Factory at `0x4fbb5bf97b05dc07083272dadb3207ec5f5288f4`. The Solidity code retains BNB Chain mainnet support; the UI manifest has no mainnet Factory address yet.
 
 Run the UI preview with `yarn dev -p 3001`. For contracts, enter `contracts/flap-boost` and run `forge build` and `forge test --no-match-path '*.mainnet.t.sol'`. The contract directory includes the required forge-std and OpenZeppelin sources and licenses. See its [README](./contracts/flap-boost/README.md) and [audit submission notes](./contracts/flap-boost/AUDIT_SUBMISSION.md) for scope and test limitations.
 

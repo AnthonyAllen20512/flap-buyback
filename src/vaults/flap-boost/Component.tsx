@@ -56,7 +56,7 @@ async function mapInBatches<T, U>(
 const PRICE_FLOOR_BPS = 7_000n;
 const BPS_DENOMINATOR = 10_000n;
 const ONE_BNB = 10n ** 18n;
-const TOTAL_FEE_TRADE_MULTIPLIER = 20n;
+const TOTAL_FEE_TRADE_MULTIPLIER = 10n;
 const BOOKING_FEE = 100_000_000_000_000n;
 // Keep wallet-submitted limits below the testnet node's per-transaction cap.
 // The same limit is used for simulation, so insufficient gas fails before signing.
@@ -284,7 +284,10 @@ function outputLabel(t: (key: string) => string, mode: OutputMode) {
 function outputRuleLabel(t: (key: string) => string, value: number) {
   const output = outputFromValue(value);
   if (output !== "distribute") return outputLabel(t, output);
-  return distributionFromValue(value) === "random" ? t("outputs.randomDistribution") : t("outputs.fixedDistribution");
+  const distribution = distributionFromValue(value) === "random"
+    ? t("outputs.randomDistribution")
+    : t("outputs.fixedDistribution");
+  return `${outputLabel(t, output)} · ${distribution}`;
 }
 
 function parseRandomHolderCount(value: string, t: (key: string) => string) {
@@ -2514,16 +2517,6 @@ function TaskForm({
         <p className="mt-2 text-xs leading-5 text-[#A4AAA8]">
           {buybackModes.find((mode) => mode.value === buyMode)?.detail}
         </p>
-        {totalFee !== null && minimumTrade !== null ? (
-          <p className="mt-2 text-xs leading-5 text-[#C2AE7C]">
-            {t("help.bookingFees", undefined, {
-              trigger: formatTokenAmount(totalFee - BOOKING_FEE, 18, 18),
-              booking: formatTokenAmount(BOOKING_FEE, 18, 18),
-              total: formatTokenAmount(totalFee, 18, 18),
-              minimum: formatTokenAmount(minimumTrade, 18, 18),
-            })}
-          </p>
-        ) : null}
         <div className={"mt-4 grid gap-3 sm:grid-cols-2 " + (buyMode === "balance-percentage" ? "lg:grid-cols-3" : "")}>
           {buyMode === "fixed-bnb" ? (
             <Field label={t("labels.bnbPerRound")}>
@@ -3103,16 +3096,6 @@ function TaskRuleEditor({
         <span className="text-xs font-semibold tracking-[0.08em] text-[#84D9D3]">{buyModeLabel(t, task.buyMode)}</span>
         <span className="text-xs text-[#9AB3B3]">{t("help.editModeFixed")}</span>
       </div>
-      {task.triggerFee !== null && minimumTrade !== null ? (
-        <p className="mt-3 text-xs leading-5 text-[#C2AE7C]">
-          {t("help.bookingFees", undefined, {
-            trigger: formatTokenAmount(task.triggerFee, 18, 18),
-            booking: formatTokenAmount(task.bookingFee, 18, 18),
-            total: formatTokenAmount(task.triggerFee + task.bookingFee, 18, 18),
-            minimum: formatTokenAmount(minimumTrade, 18, 18),
-          })}
-        </p>
-      ) : null}
       <div className={"mt-3 grid gap-3 sm:grid-cols-2 " + (mode === "balance-percentage" ? "lg:grid-cols-3" : "")}>
         {mode === "fixed-bnb" ? (
           <CompactField label={t("labels.bnbPerRound")}>

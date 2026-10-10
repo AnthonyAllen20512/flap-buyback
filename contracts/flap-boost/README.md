@@ -34,8 +34,8 @@ executes directly, without a Trigger booking fee. Each successfully booked
 automatic request pays the dynamic Trigger fee plus a fixed 0.0001 BNB booking
 fee to `0x439CEed9DBA171857e6A0b16705e3880c4ff131e`. A reverted or
 zero-ID booking does not charge the fixed booking fee. The Vault schedules only if the shared balance
-covers both fees and the reserved buyback budget, and the round is at least 20
-times the combined fees (0.006 BNB at a 0.0002 BNB Trigger fee). Each later
+covers both fees and the reserved buyback budget, and the round is at least 10
+times the combined fees (0.003 BNB at a 0.0002 BNB Trigger fee). Each later
 successful booking, including a retry after a failed request, pays again. When
 the balance is insufficient, no new Trigger is booked; a
 later `fund()` or `poke()` retries scheduling.
@@ -72,8 +72,8 @@ funding order, refund timing, reservation safety, closure, and swap retry.
 
 Use `script/testnet/bnb/DeployFlapBoostTestnet.s.sol` to deploy the Factory
 on BSC testnet.
-Current testnet Factory (chain 97): `0x095814ef73e8cdd740ecadd604b61370e3d5343f`
-([deployment transaction](https://testnet.bscscan.com/tx/0x24d541408ea7b68555f9ccbffc5c37e5909a775cab87568c68bfc9c8cf956801)).
+Current testnet Factory (chain 97): `0x4fbb5bf97b05dc07083272dadb3207ec5f5288f4`
+([deployment transaction](https://testnet.bscscan.com/tx/0x81afa2166ead839f9528aa522c52624532ce982cc69b40157d0282888317e1ff)).
 This deployment creates Vaults with the per-booking fee and combined-fee guard.
 Set `FLAP_BOOST_DEPLOYER_PRIVATE_KEY` only in a trusted local environment; do
 not put it in scripts, source files, or chat logs. Update the mini-app manifest

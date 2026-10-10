@@ -13,7 +13,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
 
     uint16 private constant BPS = 10_000;
     uint256 public constant BOOKING_FEE = 0.0001 ether;
-    uint256 public constant MIN_TOTAL_FEE_TRADE_MULTIPLIER = 20;
+    uint256 public constant MIN_TOTAL_FEE_TRADE_MULTIPLIER = 10;
     uint256 public constant MAX_OPERATIONS = 24;
     uint8 public constant MAX_RANDOM_RECIPIENTS = 20;
     uint64 public constant MIN_INTERVAL = 1 minutes;

@@ -267,7 +267,7 @@ contract FlapBoostVaultTest is Test {
         assertEq(vault.triggerId(), 0);
 
         FlapBoostVault.RuleUpdate memory update = FlapBoostVault.RuleUpdate({
-            fixedBNBPerRound: 0.004 ether,
+            fixedBNBPerRound: 0.002 ether,
             fixedTokenAmountPerRound: 0,
             balanceBps: 0,
             maxBNBPerRound: 0,
@@ -280,12 +280,12 @@ contract FlapBoostVaultTest is Test {
         vm.prank(OWNER);
         vault.updateOperation(0, update);
         assertEq(vault.triggerId(), 0);
-        update.fixedBNBPerRound = 0.006 ether;
+        update.fixedBNBPerRound = 0.003 ether;
         vm.prank(OWNER);
         vault.updateOperation(0, update);
 
         assertEq(vault.triggerId(), 1);
-        assertEq(vault.reservedBNB(), 0.006 ether);
+        assertEq(vault.reservedBNB(), 0.003 ether);
         assertEq(triggerService.afterTime(1), vault.getOperation(0).nextEligibleAt);
     }
 
@@ -428,7 +428,7 @@ contract FlapBoostVaultTest is Test {
         vault.startOperation(id);
         assertEq(vault.getOperation(id).totalBNBSpent, 0.005 ether);
         assertEq(token.balanceOf(BURN), 5 ether);
-        assertEq(vault.reservedBNB(), 0);
+        assertEq(vault.reservedBNB(), 0.005 ether);
 
         vm.prank(OWNER);
         (, uint256 percentageId) = factory.createBalancePercentageOperation(options, 5000, 0);

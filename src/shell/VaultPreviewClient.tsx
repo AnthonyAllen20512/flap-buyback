@@ -1,6 +1,6 @@
 "use client";
 
-import { ComponentType, useEffect, useState } from "react";
+import { ComponentType, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { VaultComponentProps, VaultLaunchConfigComponentProps, VaultManifest } from "@/src/sdk";
 import { useLang } from "@/src/i18n/useLang";
@@ -24,6 +24,7 @@ export function VaultPreviewClient({ folderName }: { folderName: string }) {
   const searchParams = useSearchParams();
   const [loaded, setLoaded] = useState<LoadedVault | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const i18nSnapshotRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +36,7 @@ export function VaultPreviewClient({ folderName }: { folderName: string }) {
     Promise.all([vaultModule.loadComponent(), vaultModule.loadManifest(), vaultModule.loadI18n()])
       .then(([component, manifest, i18n]) => {
         if (cancelled) return;
+        i18nSnapshotRef.current = JSON.stringify(i18n.default);
         setLoaded({
           Component: component.default,
           LaunchConfig: component.LaunchConfig,
@@ -49,6 +51,27 @@ export function VaultPreviewClient({ folderName }: { folderName: string }) {
       cancelled = true;
     };
   }, [folderName, lang.preview.unknownVault]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    let cancelled = false;
+    const refreshI18n = () => {
+      void vaultModules[folderName]?.loadI18n().then(({ default: nextI18n }) => {
+        if (cancelled) return;
+        const snapshot = JSON.stringify(nextI18n);
+        if (snapshot === i18nSnapshotRef.current) return;
+        i18nSnapshotRef.current = snapshot;
+        setLoaded((current) => current ? { ...current, i18n: nextI18n } : current);
+      }).catch(() => {});
+    };
+    window.addEventListener("focus", refreshI18n);
+    const timer = window.setInterval(refreshI18n, 4000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshI18n);
+      window.clearInterval(timer);
+    };
+  }, [folderName]);
 
   if (error) {
     return (

@@ -8,6 +8,7 @@ export const factoryAbi = parseAbi([
   "function createFixedBNBOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint256 bnbPerRound) returns (address vault, uint256 operationId)",
   "function createFixedTokenAmountOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint256 tokenAmountPerRound) returns (address vault, uint256 operationId)",
   "function createBalancePercentageOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint16 balanceBps, uint256 maxBNBPerRound) returns (address vault, uint256 operationId)",
+  "function createSplitOperation((address targetToken, uint256 minTokensPerBNB, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) options, uint8 mode, uint256 amount, uint16 balanceBps, uint256 maxBNBPerRound, uint16[3] splitBps) returns (address vault, uint256 operationId)",
 ]);
 
 export const portalAbi = parseAbi([
@@ -29,6 +30,8 @@ export const vaultAbi = parseAbi([
   "function MIN_TOTAL_FEE_TRADE_MULTIPLIER() view returns (uint256)",
   "function hasPendingRules(uint256 id) view returns (bool)",
   "function pendingRules(uint256 id) view returns ((uint256 fixedBNBPerRound, uint256 fixedTokenAmountPerRound, uint16 balanceBps, uint256 maxBNBPerRound, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients))",
+  "function outputSplit(uint256 id) view returns (uint16[3])",
+  "function pendingOutputSplit(uint256 id) view returns (uint16[3])",
   "function callbackInProgress() view returns (bool)",
   "function triggerId() view returns (uint256)",
   "function scheduledOperationId() view returns (uint256)",
@@ -47,4 +50,5 @@ export const vaultAbi = parseAbi([
   "function withdraw(uint256 amount)",
   "function poke()",
   "function updateOperation(uint256 id, (uint256 fixedBNBPerRound, uint256 fixedTokenAmountPerRound, uint16 balanceBps, uint256 maxBNBPerRound, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) update)",
+  "function updateSplitOperation(uint256 id, (uint256 fixedBNBPerRound, uint256 fixedTokenAmountPerRound, uint16 balanceBps, uint256 maxBNBPerRound, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients) update, uint16[3] splitBps)",
 ]);

@@ -3,6 +3,20 @@ pragma solidity ^0.8.24;
 
 import {FlapBoostVault} from "./FlapBoostVault.sol";
 
+/// @dev Keeps Vault creation bytecode outside the Factory runtime size limit.
+contract FlapBoostVaultDeployer {
+    address public immutable factory;
+
+    constructor() {
+        factory = msg.sender;
+    }
+
+    function deploy(address owner, address token) external returns (address) {
+        require(msg.sender == factory, "Only factory");
+        return address(new FlapBoostVault(owner, token, factory));
+    }
+}
+
 /// @notice Exactly one shared BNB Vault per owner and token.
 contract FlapBoostVaultFactory {
     struct OperationOptions {
@@ -16,11 +30,16 @@ contract FlapBoostVaultFactory {
     }
 
     mapping(address owner => mapping(address token => address vault)) public vaultOf;
+    FlapBoostVaultDeployer public immutable vaultDeployer;
     mapping(address owner => address[] vaults) private _vaults;
     address[] private _allVaults;
 
     event VaultCreated(address indexed owner, address indexed token, address indexed vault);
     event OperationCreated(address indexed owner, address indexed vault, uint256 indexed operationId);
+
+    constructor() {
+        vaultDeployer = new FlapBoostVaultDeployer();
+    }
 
     function vaultsOf(address owner) external view returns (address[] memory) {
         return _vaults[owner];
@@ -45,14 +64,16 @@ contract FlapBoostVaultFactory {
         external
         returns (address vault, uint256 operationId)
     {
-        return _create(options, FlapBoostVault.BuyMode.FIXED_BNB, bnbPerRound, 0, 0, 0);
+        uint16[3] memory empty;
+        return _create(options, FlapBoostVault.BuyMode.FIXED_BNB, bnbPerRound, 0, 0, 0, empty);
     }
 
     function createFixedTokenAmountOperation(OperationOptions calldata options, uint256 tokenAmountPerRound)
         external
         returns (address vault, uint256 operationId)
     {
-        return _create(options, FlapBoostVault.BuyMode.FIXED_TOKEN_AMOUNT, 0, tokenAmountPerRound, 0, 0);
+        uint16[3] memory empty;
+        return _create(options, FlapBoostVault.BuyMode.FIXED_TOKEN_AMOUNT, 0, tokenAmountPerRound, 0, 0, empty);
     }
 
     function createBalancePercentageOperation(
@@ -60,7 +81,28 @@ contract FlapBoostVaultFactory {
         uint16 balanceBps,
         uint256 maxBNBPerRound
     ) external returns (address vault, uint256 operationId) {
-        return _create(options, FlapBoostVault.BuyMode.BALANCE_BPS, 0, 0, balanceBps, maxBNBPerRound);
+        uint16[3] memory empty;
+        return _create(options, FlapBoostVault.BuyMode.BALANCE_BPS, 0, 0, balanceBps, maxBNBPerRound, empty);
+    }
+
+    function createSplitOperation(
+        OperationOptions calldata options,
+        FlapBoostVault.BuyMode mode,
+        uint256 amount,
+        uint16 balanceBps,
+        uint256 maxBNBPerRound,
+        uint16[3] calldata splitBps
+    ) external returns (address vault, uint256 operationId) {
+        require(options.outputMode == 4, "Not split output");
+        return _create(
+            options,
+            mode,
+            mode == FlapBoostVault.BuyMode.FIXED_BNB ? amount : 0,
+            mode == FlapBoostVault.BuyMode.FIXED_TOKEN_AMOUNT ? amount : 0,
+            balanceBps,
+            maxBNBPerRound,
+            splitBps
+        );
     }
 
     function _create(
@@ -69,19 +111,18 @@ contract FlapBoostVaultFactory {
         uint256 fixedBNB,
         uint256 fixedTokens,
         uint16 balanceBps,
-        uint256 maxBNB
+        uint256 maxBNB,
+        uint16[3] memory splitBps
     ) private returns (address vault, uint256 operationId) {
         vault = vaultOf[msg.sender][options.targetToken];
         if (vault == address(0)) {
-            vault = address(new FlapBoostVault(msg.sender, options.targetToken));
+            vault = vaultDeployer.deploy(msg.sender, options.targetToken);
             vaultOf[msg.sender][options.targetToken] = vault;
             _vaults[msg.sender].push(vault);
             _allVaults.push(vault);
             emit VaultCreated(msg.sender, options.targetToken, vault);
         }
-        operationId = FlapBoostVault(payable(vault))
-            .addOperation(
-                FlapBoostVault.OperationConfig({
+        FlapBoostVault.OperationConfig memory config = FlapBoostVault.OperationConfig({
                     buyMode: mode,
                     fixedBNBPerRound: fixedBNB,
                     fixedTokenAmountPerRound: fixedTokens,
@@ -93,8 +134,10 @@ contract FlapBoostVaultFactory {
                     randomRecipientCount: options.randomRecipientCount,
                     retainRecipient: options.retainRecipient,
                     recipients: options.recipients
-                })
-            );
+                });
+        operationId = options.outputMode >= 4
+            ? FlapBoostVault(payable(vault)).addSplitOperation(config, splitBps)
+            : FlapBoostVault(payable(vault)).addOperation(config);
         emit OperationCreated(msg.sender, vault, operationId);
     }
 }

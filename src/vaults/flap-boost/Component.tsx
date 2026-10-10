@@ -72,6 +72,9 @@ const GOLD_OUTLINE_BUTTON =
 
 type OutputMode = "burn" | "retain" | "distribute";
 type DistributionMode = "fixed" | "random";
+type SplitShares = [number, number, number];
+type SplitInputs = [string, string, string];
+type SplitSelections = [boolean, boolean, boolean];
 type BuyMode = "fixed-bnb" | "fixed-token" | "balance-percentage";
 type TaskAction = "pause" | "resume" | "close";
 
@@ -107,6 +110,8 @@ interface TaskSnapshot {
   minTokensPerBNB: bigint;
   interval: bigint;
   outputMode: number;
+  outputSplit: SplitShares;
+  pendingOutputSplit: SplitShares | null;
   randomRecipientCount: number;
   retainRecipient: Address;
   recipients: Address[];
@@ -182,6 +187,8 @@ type TaskConfig =
   | { mode: "fixed-bnb"; options: TaskOptions; bnbPerRound: bigint }
   | { mode: "fixed-token"; options: TaskOptions; tokenAmountPerRound: bigint }
   | { mode: "balance-percentage"; options: TaskOptions; balanceBps: number; maxBNBPerRound: bigint };
+
+type CreateTaskConfig = TaskConfig & { splitBps?: SplitShares };
 
 function taskTotalBNB(task: TaskSnapshot) {
   return task.availableBNB + task.reservedBNB + task.bookingFeeOwed;
@@ -281,7 +288,8 @@ function outputLabel(t: (key: string) => string, mode: OutputMode) {
   return mode === "burn" ? t("outputs.burn") : mode === "distribute" ? t("outputs.distribute") : t("outputs.retain");
 }
 
-function outputRuleLabel(t: (key: string) => string, value: number) {
+function outputRuleLabel(t: (key: string) => string, value: number, shares?: SplitShares) {
+  if (value === 4) return shares ? splitSummary(t, shares) : t("labels.outputSplit");
   const output = outputFromValue(value);
   if (output !== "distribute") return outputLabel(t, output);
   const distribution = distributionFromValue(value) === "random"
@@ -297,6 +305,17 @@ function parseRandomHolderCount(value: string, t: (key: string) => string) {
   return count;
 }
 
+function validFixedRecipientsInput(value: string) {
+  const recipients = value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+  const unique = new Set(recipients.map((item) => item.toLowerCase()));
+  return recipients.length >= 1 && recipients.length <= 5 && unique.size === recipients.length &&
+    recipients.every((item) => isValidAddress(item) && item !== ZERO_ADDRESS);
+}
+
+function validRandomRecipientCount(value: string) {
+  return /^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 20;
+}
+
 function buyModeFromValue(value: number): BuyMode {
   return value === 1 ? "fixed-token" : value === 2 ? "balance-percentage" : "fixed-bnb";
 }
@@ -307,6 +326,39 @@ function parsePercentageToBps(value: string, t: (key: string) => string) {
   const bps = Number(whole) * 100 + Number((fraction + "00").slice(0, 2));
   if (!Number.isInteger(bps) || bps < 1 || bps > 10_000) throw new Error(t("errors.percentage"));
   return bps;
+}
+
+function parseOutputSplit(selected: SplitSelections, values: SplitInputs, t: (key: string) => string): SplitShares {
+  const shares = values.map((value, index) => {
+    if (!selected[index]) return 0;
+    if (!/^\d+(?:\.\d{1,2})?$/.test(value.trim())) throw new Error(t("errors.outputSplit"));
+    const [whole, fraction = ""] = value.trim().split(".");
+    const bps = Number(whole) * 100 + Number((fraction + "00").slice(0, 2));
+    if (!Number.isInteger(bps) || bps < 1 || bps > 10_000) throw new Error(t("errors.outputSplit"));
+    return bps;
+  }) as SplitShares;
+  if (shares[0] + shares[1] + shares[2] !== 10_000) throw new Error(t("errors.outputSplit"));
+  return shares;
+}
+
+function validOutputSplit(selected: SplitSelections, values: SplitInputs, t: (key: string) => string) {
+  try {
+    parseOutputSplit(selected, values, t);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function formatSplitShare(bps: number) {
+  return String(bps / 100);
+}
+
+function splitSummary(t: (key: string) => string, shares: SplitShares) {
+  return [t("outputs.burn"), t("outputs.fixedDistribution"), t("outputs.randomDistribution")]
+    .map((label, index) => shares[index] ? `${label} ${formatSplitShare(shares[index])}%` : "")
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function percentageBpsOrNull(value: string): number | null {
@@ -497,6 +549,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const [maxBnbPerRound, setMaxBnbPerRound] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState("60");
   const [outputMode, setOutputMode] = useState<OutputMode>("burn");
+  const [splitSelected, setSplitSelected] = useState<SplitSelections>([true, false, false]);
+  const [splitValues, setSplitValues] = useState<SplitInputs>(["100", "0", "0"]);
   const [distributionMode, setDistributionMode] = useState<DistributionMode>("fixed");
   const [retainRecipient, setRetainRecipient] = useState("");
   const [recipientsText, setRecipientsText] = useState("");
@@ -531,6 +585,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const marketPhase = context.host?.marketPhase ?? "unknown";
   const actionsAvailable = isActionAvailableForPhase(actionStage, marketPhase);
   const wrongNetwork = sdk.wallet.isWrongNetwork;
+  const splitOutputEnabled = context.chainId === 97;
   const readIdentity = `${context.chainId}:${factoryAddress}:${context.userAddress?.toLowerCase() ?? ""}`;
   const tasks = useMemo(
     () => (loadedIdentity === readIdentity ? taskSnapshots : []),
@@ -581,6 +636,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
 
   function beginCreateTask(mode: OutputMode) {
     setOutputMode(mode);
+    setSplitSelected([true, false, false]);
+    setSplitValues(["100", "0", "0"]);
     setDistributionMode("fixed");
     setActiveView("create");
     setRetainRecipient("");
@@ -610,6 +667,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     setSelectedTaskAddress(null);
     setActiveView("create");
     setOutputMode("burn");
+    setSplitSelected([true, false, false]);
+    setSplitValues(["100", "0", "0"]);
     setDistributionMode("fixed");
     setRetainRecipient("");
     setRecipientsText("");
@@ -629,7 +688,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     setActiveView("mine");
   }
 
-  const config = useMemo<TaskConfig | Error>(() => {
+  const config = useMemo<CreateTaskConfig | Error>(() => {
     try {
       if (!isValidAddress(tokenAddressInput) || tokenAddressInput === ZERO_ADDRESS)
         throw new Error(t("errors.targetToken"));
@@ -645,13 +704,20 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       let outputModeValue = 0;
       let randomCount = 0;
       let recipient = ZERO_ADDRESS;
-      if (outputMode === "retain") {
+      const splitBps = splitOutputEnabled ? parseOutputSplit(splitSelected, splitValues, t) : undefined;
+      if (splitBps) {
+        outputModeValue = 4;
+        if (splitBps[1] > 0) {
+          if (!validFixedRecipientsInput(recipientsText)) throw new Error(t("errors.fixedRecipients"));
+        } else recipients.length = 0;
+        if (splitBps[2] > 0) randomCount = parseRandomHolderCount(randomRecipientCount, t);
+      } else if (outputMode === "retain") {
         if (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS)
           throw new Error(t("errors.retainWallet"));
         outputModeValue = 1;
         recipient = retainRecipient.trim() as Address;
       }
-      if (outputMode === "distribute") {
+      if (!splitBps && outputMode === "distribute") {
         if (distributionMode === "random") {
           randomCount = parseRandomHolderCount(randomRecipientCount, t);
           recipients.length = 0;
@@ -687,12 +753,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
             amount: formatTokenAmount(creationMinimumTrade, 18, 18),
           }));
         }
-        return { mode: buyMode, options, bnbPerRound: amount };
+        return { mode: buyMode, options, bnbPerRound: amount, splitBps };
       }
       if (buyMode === "fixed-token") {
         const tokenAmount = parseAmount(tokenAmountPerRound, tokenInfo.decimals, t);
         if (tokenAmount <= 0n) throw new Error(t("errors.amount"));
-        return { mode: buyMode, options, tokenAmountPerRound: tokenAmount };
+        return { mode: buyMode, options, tokenAmountPerRound: tokenAmount, splitBps };
       }
       const balanceBps = parsePercentageToBps(balancePercentage, t);
       const optionalMaxBNB = maxBnbPerRound.trim() ? parseAmount(maxBnbPerRound, 18, t) : 0n;
@@ -705,7 +771,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           }));
         }
       }
-      return { mode: buyMode, options, balanceBps, maxBNBPerRound: optionalMaxBNB };
+      return { mode: buyMode, options, balanceBps, maxBNBPerRound: optionalMaxBNB, splitBps };
     } catch (nextError) {
       return nextError instanceof Error ? nextError : new Error(t("errors.amount"));
     }
@@ -721,6 +787,9 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     recipientsText,
     randomRecipientCount,
     retainRecipient,
+    splitOutputEnabled,
+    splitSelected,
+    splitValues,
     t,
     tokenAddressInput,
     tokenInfo,
@@ -948,6 +1017,24 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               args: [BigInt(id)],
             })
           : null;
+        const outputSplit: SplitShares = operation.outputMode === 4
+          ? [...await sdk.readContract<SplitShares>({
+              contract: "boostVault",
+              address: vault.address,
+              abi: vaultAbi,
+              functionName: "outputSplit",
+              args: [BigInt(id)],
+            })] as SplitShares
+          : [0, 0, 0];
+        const pendingOutputSplit: SplitShares | null = pendingRuleUpdate?.outputMode === 4
+          ? [...await sdk.readContract<SplitShares>({
+              contract: "boostVault",
+              address: vault.address,
+              abi: vaultAbi,
+              functionName: "pendingOutputSplit",
+              args: [BigInt(id)],
+            })] as SplitShares
+          : null;
         return {
           address: vault.address,
           operationId: id,
@@ -961,6 +1048,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           minTokensPerBNB: operation.minTokensPerBNB,
           interval: operation.interval,
           outputMode: operation.outputMode,
+          outputSplit,
+          pendingOutputSplit,
           randomRecipientCount: operation.randomRecipientCount,
           retainRecipient: operation.retainRecipient,
           recipients: operation.recipients,
@@ -1120,8 +1209,24 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         const freshFloor = await readPriceFloor(config.options.targetToken);
         const options = { ...config.options, minTokensPerBNB: freshFloor };
         setMinTokensPerBNB(freshFloor);
-        const simulation =
-          config.mode === "fixed-bnb"
+        const simulation = config.splitBps
+          ? await sdk.simulateContract({
+              contract: "boostFactory",
+              address: factoryAddress,
+              abi: factoryAbi,
+              functionName: "createSplitOperation",
+              args: [
+                options,
+                config.mode === "fixed-bnb" ? 0 : config.mode === "fixed-token" ? 1 : 2,
+                config.mode === "fixed-bnb" ? config.bnbPerRound
+                  : config.mode === "fixed-token" ? config.tokenAmountPerRound : 0n,
+                config.mode === "balance-percentage" ? config.balanceBps : 0,
+                config.mode === "balance-percentage" ? config.maxBNBPerRound : 0n,
+                config.splitBps,
+              ],
+              gas: CREATE_OPERATION_GAS,
+            })
+          : config.mode === "fixed-bnb"
             ? await sdk.simulateContract({
                 contract: "boostFactory",
                 address: factoryAddress,
@@ -1278,7 +1383,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     );
   }
 
-  async function updateTaskRules(task: TaskSnapshot, update: TaskRuleUpdate): Promise<boolean> {
+  async function updateTaskRules(task: TaskSnapshot, update: TaskRuleUpdate, splitBps?: SplitShares): Promise<boolean> {
     if (!canWrite || !selectedTaskIsOwner || !task.active) return false;
     return runAction(
       "rules:" + task.address,
@@ -1288,8 +1393,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           contract: "boostVault",
           address: task.address,
           abi: vaultAbi,
-          functionName: "updateOperation",
-          args: [BigInt(task.operationId), update],
+          functionName: splitBps ? "updateSplitOperation" : "updateOperation",
+          args: splitBps ? [BigInt(task.operationId), update, splitBps] : [BigInt(task.operationId), update],
         });
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
@@ -1595,7 +1700,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     {t("buttons.cancel")}
                   </Button>
                 </div>
-                <div className="p-3 sm:p-5">
+                <div className="px-4 sm:px-6">
                   <TaskForm
                     t={t}
                     tokenAddress={tokenAddressInput}
@@ -1623,6 +1728,11 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     setIntervalMinutes={setIntervalMinutes}
                     outputMode={outputMode}
                     setOutputMode={setOutputMode}
+                    splitOutputEnabled={splitOutputEnabled}
+                    splitSelected={splitSelected}
+                    setSplitSelected={setSplitSelected}
+                    splitValues={splitValues}
+                    setSplitValues={setSplitValues}
                     distributionMode={distributionMode}
                     setDistributionMode={setDistributionMode}
                     retainRecipient={retainRecipient}
@@ -1633,7 +1743,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     setRandomRecipientCount={setRandomRecipientCount}
                   />
                 </div>
-                {tokenReady ? <div className="boost-route-preview mx-3 mb-4 overflow-hidden rounded-xl px-3 py-3 sm:mx-5 sm:px-5">
+                {tokenReady ? <div className="boost-route-preview mx-4 mb-4 overflow-hidden py-4 sm:mx-6">
                   <div className="relative z-10 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                     <p className="text-xs font-semibold tracking-[0.08em] text-[#F3D99A]">{t("sections.rulePreview")}</p>
                     <p className="text-[11px] text-[#9BA5A4]">{t("help.rulePreview")}</p>
@@ -1652,14 +1762,18 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     </div>
                     <span className="boost-route-link boost-route-link-late" aria-hidden="true"><i /></span>
                     <div className="boost-route-node min-w-0">
-                      <span className="boost-route-icon">{outputMode === "burn" ? <Flame className="h-4 w-4" /> : outputMode === "retain" ? <Wallet className="h-4 w-4" /> : <Coins className="h-4 w-4" />}</span>
+                      <span className="boost-route-icon">{splitOutputEnabled ? <Coins className="h-4 w-4" /> : outputMode === "burn" ? <Flame className="h-4 w-4" /> : outputMode === "retain" ? <Wallet className="h-4 w-4" /> : <Coins className="h-4 w-4" />}</span>
                       <span className="boost-route-caption">{t("labels.output")}</span>
-                      <strong className="boost-route-value" title={outputLabel(t, outputMode)}>{outputLabel(t, outputMode)}</strong>
+                      <strong className="boost-route-value" title={splitOutputEnabled ? t("labels.outputSplit") : outputLabel(t, outputMode)}>{splitOutputEnabled ? t("labels.outputSplit") : outputLabel(t, outputMode)}</strong>
                     </div>
                   </div>
-                  <p className="relative z-10 mt-3 text-[11px] text-[#A8A89F]">{t("labels.interval")} · {intervalMinutes || "—"} {t("labels.minutes")}</p>
+                  <p className="relative z-10 mt-3 text-[11px] text-[#A8A89F]">
+                    {t("labels.interval")} · {intervalMinutes || "—"} {t("labels.minutes")}
+                    {splitOutputEnabled && !(config instanceof Error) && config.splitBps
+                      ? ` · ${splitSummary(t, config.splitBps)}` : ""}
+                  </p>
                 </div> : null}
-                <div className="flex flex-col gap-3 border-t border-[#474840] bg-[#091116]/70 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                <div className="flex flex-col gap-3 border-t border-[#39484A] p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                   <div className="min-w-0 text-xs leading-5 text-[#9AB6B5]">
                     <p>{t("help.createThenFund")}</p>
                     {operationCountForInput >= 24 ? (
@@ -1765,7 +1879,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                 canWrite={canWrite}
                 isOwner={selectedTaskIsOwner}
                 buttonState={buttonState("rules:" + selectedTask.address)}
-                onUpdate={(update) => updateTaskRules(selectedTask, update)}
+                onUpdate={(update, splitBps) => updateTaskRules(selectedTask, update, splitBps)}
               />}
             </section>
           ) : null}
@@ -2145,29 +2259,21 @@ function BoostMotionStyles() {
     .boost-empty-seal-ray { position: absolute; top: 50%; left: -13px; width: 128px; height: 1px; background: linear-gradient(90deg, transparent, #E9CF8A95 15%, transparent 29% 71%, #E9CF8A95 85%, transparent); }
     .boost-empty-seal-ray-two { transform: rotate(90deg); }
     .boost-empty-icon { position: relative; z-index: 1; border: 1px solid #C4A668; color: #F4DB99; background: linear-gradient(145deg, #6C5430, #1B2228 65%); box-shadow: inset 0 1px 0 #FFF0BB85, 0 0 24px #DAB25769; animation: boostIconBreathe 4.5s ease-in-out infinite; }
-    .flap-boost-form-reveal { border: 1px solid #43524F; background: #0C141A; box-shadow: inset 0 1px 0 #FCE5A416; animation: boostEnter 420ms cubic-bezier(.16,1,.3,1) both; }
-    .boost-vault-panel-head { position: relative; isolation: isolate; overflow: hidden; background: linear-gradient(90deg, #D8BE7F23 1px, transparent 1px) 14px 0 / 1px 100% no-repeat, radial-gradient(ellipse at 80% 43%, #C9A64E26, transparent 38%), linear-gradient(110deg, #172631, #111B23 57%, #292214); }
-    .boost-vault-panel-head::before { content: ""; pointer-events: none; position: absolute; inset: 0; opacity: .35; background-image: linear-gradient(#E4D2A20C 1px, transparent 1px), linear-gradient(90deg, #E4D2A20C 1px, transparent 1px); background-size: 19px 19px; mask-image: linear-gradient(90deg, transparent, #000 50%, #000); }
-    .boost-vault-panel-head::after { content: ""; pointer-events: none; position: absolute; bottom: 0; left: -36%; width: 36%; height: 1px; background: linear-gradient(90deg, transparent, #FFF1BE, transparent); box-shadow: 0 0 12px #F1D386; animation: boostRail 6.5s ease-in-out infinite; }
+    .flap-boost-form-reveal { background: transparent; animation: boostEnter 420ms cubic-bezier(.16,1,.3,1) both; }
+    .boost-vault-panel-head { position: relative; background: transparent; }
     .boost-vault-eyebrow { text-shadow: 0 0 14px #E6C5766B; }
-    .boost-route-preview { position: relative; isolation: isolate; border: 1px solid #60553E; background: radial-gradient(ellipse at 85% 12%, #BD9A4C1F, transparent 48%), linear-gradient(110deg, #13202A, #0C161E 52%, #1A1B17); box-shadow: inset 0 1px 0 #FFF2C41B, 0 16px 35px -30px #D6B46569; }
-    .boost-route-preview::before { content: ""; pointer-events: none; position: absolute; inset: 0; z-index: 0; opacity: .22; background-image: linear-gradient(#DCC48E0B 1px, transparent 1px), linear-gradient(90deg, #DCC48E0B 1px, transparent 1px); background-size: 20px 20px; mask-image: linear-gradient(90deg, transparent, #000); }
-    .boost-route-preview::after { content: ""; pointer-events: none; position: absolute; top: 0; left: -35%; width: 35%; height: 1px; background: linear-gradient(90deg, transparent, #FFE4A5, transparent); box-shadow: 0 0 9px #DFB963; animation: boostRail 10s ease-in-out infinite; }
-    .boost-route-node { display: grid; grid-template-columns: 27px minmax(0,1fr); grid-template-rows: auto auto; align-items: center; column-gap: 7px; min-height: 52px; border: 1px solid #3D4646; border-radius: 9px; background: #0A141B9C; padding: 6px; transition: border-color 240ms ease, background 240ms ease; }
-    .boost-route-node:last-child { border-color: #726247; background: #241F17B5; }
+    .boost-route-preview { position: relative; isolation: isolate; border-top: 1px solid #39484A; }
+    .boost-route-node { display: grid; grid-template-columns: 27px minmax(0,1fr); grid-template-rows: auto auto; align-items: center; column-gap: 7px; min-height: 52px; padding: 6px 0; }
     .boost-route-icon { display: grid; grid-row: 1 / span 2; place-items: center; width: 26px; height: 26px; border: 1px solid #9A80506B; border-radius: 7px; color: #EBD393; background: #3B322346; }
     .boost-route-caption { overflow: hidden; color: #9FABA9; font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
     .boost-route-value { min-width: 0; overflow: hidden; color: #F6F0E3; font: 600 12px/1.3 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
     .boost-route-link { position: relative; height: 1px; background: linear-gradient(90deg, #806D4A, #DFC983); }
     .boost-route-link i { position: absolute; top: -2px; left: 0; width: 5px; height: 5px; border-radius: 50%; background: #FFE7A7; box-shadow: 0 0 8px 2px #E1C17472; animation: boostRouteTravel 4.8s ease-in-out infinite; }
     .boost-route-link-late i { animation-delay: -2.4s; }
-    .boost-form-step { position: relative; overflow: hidden; border-color: #34464A !important; background: linear-gradient(135deg, #111B22, #0D151B) !important; box-shadow: inset 0 1px 0 #FFE3A716; }
-    .boost-form-step::before { content: ""; position: absolute; pointer-events: none; top: 0; left: -50%; width: 50%; height: 1px; opacity: 0; background: linear-gradient(90deg, transparent, #F4DA9A, transparent); box-shadow: 0 0 11px #E9C87B; animation: boostStepRail 8s ease-in-out infinite; }
-    .boost-form-step::after { content: ""; pointer-events: none; position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at 0 0, #E2BF6A17, transparent 38%); transition: opacity 300ms ease; }
-    .boost-form-step:nth-child(2)::before { animation-delay: -2.7s; }.boost-form-step:nth-child(3)::before { animation-delay: -5.4s; }
-    .boost-form-step:focus-within { border-color: #917A4D !important; box-shadow: inset 0 1px 0 #FFE7A028, 0 0 28px -21px #E7C570; }
-    .boost-form-step:focus-within::before { opacity: 1; }
-    .boost-form-step:focus-within::after { opacity: 1; }
+    .boost-form-step { position: relative; border-bottom: 1px solid #34464A; }
+    .boost-form-step:last-child { border-bottom: 0; }
+    .boost-form-step::before { content: ""; position: absolute; pointer-events: none; left: 0; bottom: -1px; width: 0; height: 1px; background: linear-gradient(90deg, #E8D08C, transparent); transition: width 320ms ease; }
+    .boost-form-step:focus-within::before { width: 45%; }
     .boost-step-heading { position: relative; z-index: 1; }
     .boost-step-heading > span:nth-child(2) { transform-origin: left; animation: boostStepLink 700ms cubic-bezier(.2,.8,.2,1) both; }
     .boost-step-index { animation: boostIndex 7.2s ease-in-out infinite; }
@@ -2339,6 +2445,11 @@ function TaskForm({
   setIntervalMinutes,
   outputMode,
   setOutputMode,
+  splitOutputEnabled,
+  splitSelected,
+  setSplitSelected,
+  splitValues,
+  setSplitValues,
   distributionMode,
   setDistributionMode,
   retainRecipient,
@@ -2374,6 +2485,11 @@ function TaskForm({
   setIntervalMinutes: (value: string) => void;
   outputMode: OutputMode;
   setOutputMode: (value: OutputMode) => void;
+  splitOutputEnabled: boolean;
+  splitSelected: SplitSelections;
+  setSplitSelected: (value: SplitSelections) => void;
+  splitValues: SplitInputs;
+  setSplitValues: (value: SplitInputs) => void;
   distributionMode: DistributionMode;
   setDistributionMode: (value: DistributionMode) => void;
   retainRecipient: string;
@@ -2393,6 +2509,8 @@ function TaskForm({
   const balanceBps = percentageBpsOrNull(balancePercentage);
   const balancePercentageInvalid = buyMode === "balance-percentage" && balanceBps === null;
   const requiredBalance = minimumBalanceForPercentage(totalFee, minimumTrade, balanceBps);
+  const splitFixedInvalid = splitOutputEnabled && splitSelected[1] && !validFixedRecipientsInput(recipientsText);
+  const splitRandomInvalid = splitOutputEnabled && splitSelected[2] && !validRandomRecipientCount(randomRecipientCount);
   const outputOptions: Array<{ value: OutputMode; label: string }> = [
     { value: "burn", label: t("outputs.burn") },
     { value: "retain", label: t("outputs.retain") },
@@ -2419,8 +2537,8 @@ function TaskForm({
     },
   ];
   return (
-    <div className="space-y-5">
-      <section className="boost-form-step rounded-xl border border-[#3D4548] bg-[#10171E]/75 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(190,246,241,0.04)]">
+    <div>
+      <section className="boost-form-step py-5">
         <SectionHeading index="01" icon={<Target className="h-4 w-4" />} title={t("labels.targetToken")} />
         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           {lockedToken ? (
@@ -2472,8 +2590,8 @@ function TaskForm({
           {t("help.loadCaBeforeRules")}
         </p>
       ) : null}
-      <fieldset disabled={!tokenReady} className={"m-0 min-w-0 space-y-5 border-0 p-0 " + (!tokenReady ? "opacity-45" : "")}>
-      <section className="boost-form-step rounded-xl border border-[#3D4548] bg-[#10171E]/75 p-3 sm:p-4">
+      <fieldset disabled={!tokenReady} className={"m-0 min-w-0 border-0 p-0 " + (!tokenReady ? "opacity-45" : "")}>
+      <section className="boost-form-step py-5">
         <SectionHeading index="02" icon={<Gauge className="h-4 w-4" />} title={t("labels.ruleSettings")} />
         <div className="mt-3 grid grid-cols-3 gap-2">
           {buybackModes.map((mode) => {
@@ -2606,8 +2724,49 @@ function TaskForm({
         ) : null}
       </section>
 
-      <section className="boost-form-step rounded-xl border border-[#3D4548] bg-[#10171E]/75 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(190,246,241,0.04)]">
+      <section className="boost-form-step py-5">
         <SectionHeading index="03" icon={<Flame className="h-4 w-4" />} title={t("labels.output")} />
+        {splitOutputEnabled ? (
+          <>
+            <SplitOutputSelector
+              t={t}
+              selected={splitSelected}
+              onSelected={setSplitSelected}
+              values={splitValues}
+              onValues={setSplitValues}
+            />
+            {splitSelected[1] ? (
+              <div className="mt-4">
+                <Field label={t("labels.fixedRecipients")} hint={t("help.recipients")}>
+                  <textarea
+                    value={recipientsText}
+                    onChange={(event) => setRecipientsText(event.target.value)}
+                    placeholder={t("placeholders.fixedRecipients")}
+                    rows={3}
+                    aria-invalid={splitFixedInvalid}
+                    className={"w-full resize-y rounded-lg border bg-[#071015] px-3 py-2.5 font-mono text-xs text-[#F6F2E8] outline-none " +
+                      (splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")}
+                  />
+                </Field>
+              </div>
+            ) : null}
+            {splitSelected[2] ? (
+              <div className="mt-4">
+                <Field label={t("labels.randomHolderCount")} hint={t("help.randomHolders")}>
+                  <Input
+                    value={randomRecipientCount}
+                    onChange={(event) => setRandomRecipientCount(event.target.value)}
+                    inputMode="numeric"
+                    placeholder={t("placeholders.randomHolders")}
+                    aria-invalid={splitRandomInvalid}
+                    className={splitRandomInvalid ? "!border-[#D46A64] !text-[#FFBDB6]" : undefined}
+                  />
+                </Field>
+              </div>
+            ) : null}
+          </>
+        ) : (
+        <>
         <div className="mt-4 grid grid-cols-3 gap-2">
           {outputOptions.map((option) => (
             <Button
@@ -2693,8 +2852,97 @@ function TaskForm({
             )}
           </div>
         ) : null}
+        </>
+        )}
       </section>
       </fieldset>
+    </div>
+  );
+}
+
+function SplitOutputSelector({
+  t,
+  selected,
+  onSelected,
+  values,
+  onValues,
+}: {
+  t: (key: string) => string;
+  selected: SplitSelections;
+  onSelected: (value: SplitSelections) => void;
+  values: SplitInputs;
+  onValues: (value: SplitInputs) => void;
+}) {
+  const labels = [t("outputs.burn"), t("outputs.fixedDistribution"), t("outputs.randomDistribution")];
+  const activeCount = selected.filter(Boolean).length;
+  const total = selected.reduce((sum, isSelected, index) => sum + (isSelected ? Number(values[index]) || 0 : 0), 0);
+  let valid = false;
+  try {
+    parseOutputSplit(selected, values, t);
+    valid = true;
+  } catch { /* The inline error and disabled submit explain the invalid sum. */ }
+
+  function toggle(index: number) {
+    if (selected[index] && activeCount === 1) return;
+    const next = selected.map((value, item) => item === index ? !value : value) as SplitSelections;
+    const count = next.filter(Boolean).length;
+    let remaining = 10_000;
+    let remainingCount = count;
+    const nextValues = next.map((value) => {
+      if (!value) return "0";
+      const share = Math.floor(remaining / remainingCount);
+      remaining -= share;
+      remainingCount -= 1;
+      return formatSplitShare(share);
+    }) as SplitInputs;
+    onSelected(next);
+    onValues(nextValues);
+  }
+
+  return (
+    <div className="mt-4">
+      <p className="text-xs leading-5 text-[#A4AAA8]">{t("help.outputSplit")}</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {labels.map((label, index) => (
+          <div key={label} className={"rounded-lg border px-3 py-3 transition-colors " +
+            (selected[index] ? "border-[#B99757] bg-[#27241C]" : "border-[#3D454A] bg-[#0D1319]")}>
+            <button
+              type="button"
+              aria-pressed={selected[index]}
+              onClick={() => toggle(index)}
+              className="flex w-full items-center gap-2 text-left text-sm font-semibold text-[#F5E7C7]"
+            >
+              <span className={"flex h-4 w-4 items-center justify-center rounded border " +
+                (selected[index] ? "border-[#E8C874] bg-[#E8C874] text-[#211907]" : "border-[#687175]")}>
+                {selected[index] ? <CircleCheck className="h-3 w-3" /> : null}
+              </span>
+              {label}
+            </button>
+            {selected[index] ? (
+              <label className="mt-3 flex items-center gap-2">
+                <Input
+                  aria-label={`${label} ${t("labels.splitPercent")}`}
+                  aria-invalid={!valid}
+                  inputMode="decimal"
+                  value={values[index]}
+                  onChange={(event) => {
+                    const next = [...values] as SplitInputs;
+                    next[index] = event.target.value;
+                    onValues(next);
+                  }}
+                  className={"h-10 min-w-0 flex-1 rounded-lg bg-[#071015] text-right font-mono text-sm " +
+                    (!valid ? "!border-[#D46A64] !text-[#FFBDB6]" : "border-[#50534F]")}
+                />
+                <span className="text-sm text-[#C5B88F]">%</span>
+              </label>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <p className={"mt-2 text-xs " + (valid ? "text-[#A4AAA8]" : "text-[#FFB5AF]")}>
+        {t("labels.splitTotal")} {Number.isFinite(total) ? total.toFixed(2).replace(/\.00$/, "") : "—"}%
+        {!valid ? ` · ${t("errors.outputSplit")}` : ""}
+      </p>
     </div>
   );
 }
@@ -2768,7 +3016,7 @@ function TaskList({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-lg font-semibold">
                   <span className="text-[#F4FAF9]">{task.token.symbol}</span>
-                  <span className="text-[#F0CB9D]">· {outputRuleLabel(t, task.outputMode)}</span>
+                  <span className="text-[#F0CB9D]">· {task.outputMode === 4 ? t("labels.outputSplit") : outputRuleLabel(t, task.outputMode)}</span>
                   <span className="font-mono text-xs font-medium text-[#959993]">#{task.operationId + 1}</span>
                 </div>
                 <p className="mt-2 text-base text-[#CDD0C8]">
@@ -2847,12 +3095,18 @@ function TaskOverview({
   canWrite: boolean;
   isOwner: boolean;
   buttonState: TxButtonState;
-  onUpdate: (update: TaskRuleUpdate) => Promise<boolean>;
+  onUpdate: (update: TaskRuleUpdate, splitBps?: SplitShares) => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const output = outputFromValue(task.outputMode);
+  const isSplit = task.outputMode === 4;
   const outputDetail =
-    output === "retain"
+    isSplit
+      ? [
+          task.outputSplit[1] ? t("labels.recipientCount", undefined, { count: task.recipients.length }) : "",
+          task.outputSplit[2] ? t("labels.randomHoldersPerRound", undefined, { count: task.randomRecipientCount }) : "",
+        ].filter(Boolean).join(" · ")
+      : output === "retain"
       ? shortAddress(task.retainRecipient)
       : output === "distribute"
         ? distributionFromValue(task.outputMode) === "random"
@@ -2898,7 +3152,7 @@ function TaskOverview({
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3">
           <dt className="text-xs text-[#9DA5A5]">{t("labels.output")}</dt>
           <dd className="text-right text-sm text-[#F6F2E8]">
-            <span className="font-semibold">{outputRuleLabel(t, task.outputMode)}</span>
+            <span className="font-semibold">{outputRuleLabel(t, task.outputMode, task.outputSplit)}</span>
             <span className="ml-2 text-[#C4C2B8]">{outputDetail}</span>
           </dd>
         </div>
@@ -2919,7 +3173,7 @@ function TaskOverview({
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-[#394148] bg-[#0D171B] px-4 py-3 sm:px-5">
         <span className="text-xs text-[#9DA5A5]">
           {t(
-            output === "burn"
+            isSplit ? "labels.totalTokensOut" : output === "burn"
               ? "labels.totalBurned"
               : output === "retain"
                 ? "labels.totalRetained"
@@ -2953,8 +3207,8 @@ function TaskOverview({
             canWrite={canWrite}
             buttonState={buttonState}
             onCancel={() => setEditing(false)}
-            onSave={async (update) => {
-              if (await onUpdate(update)) setEditing(false);
+            onSave={async (update, splitBps) => {
+              if (await onUpdate(update, splitBps)) setEditing(false);
             }}
           />
         </div>
@@ -2976,7 +3230,7 @@ function TaskRuleEditor({
   canWrite: boolean;
   buttonState: TxButtonState;
   onCancel: () => void;
-  onSave: (update: TaskRuleUpdate) => Promise<void>;
+  onSave: (update: TaskRuleUpdate, splitBps?: SplitShares) => Promise<void>;
 }) {
   const mode = buyModeFromValue(task.buyMode);
   const rules = task.pendingRuleUpdate ?? task;
@@ -2990,6 +3244,10 @@ function TaskRuleEditor({
   );
   const [intervalMinutes, setIntervalMinutes] = useState((rules.interval / 60n).toString());
   const [output, setOutput] = useState<OutputMode>(outputFromValue(rules.outputMode));
+  const isSplit = rules.outputMode === 4;
+  const initialSplit = task.pendingOutputSplit ?? task.outputSplit;
+  const [splitSelected, setSplitSelected] = useState<SplitSelections>(initialSplit.map((share) => share > 0) as SplitSelections);
+  const [splitValues, setSplitValues] = useState<SplitInputs>(initialSplit.map(formatSplitShare) as SplitInputs);
   const [distributionMode, setDistributionMode] = useState<DistributionMode>(distributionFromValue(rules.outputMode));
   const [retainRecipient, setRetainRecipient] = useState(
     rules.retainRecipient === ZERO_ADDRESS ? "" : rules.retainRecipient,
@@ -3011,6 +3269,8 @@ function TaskRuleEditor({
   const requiredBalance = minimumBalanceForPercentage(
     task.triggerFee === null ? null : task.triggerFee + task.bookingFee, minimumTrade, balanceBps,
   );
+  const splitFixedInvalid = isSplit && splitSelected[1] && !validFixedRecipientsInput(recipientsText);
+  const splitRandomInvalid = isSplit && splitSelected[2] && !validRandomRecipientCount(randomRecipientCount);
 
   function submitRules() {
     try {
@@ -3049,7 +3309,14 @@ function TaskRuleEditor({
       let outputMode = 0;
       let randomCount = 0;
       let recipient = ZERO_ADDRESS;
-      if (output === "retain") {
+      const splitBps = isSplit ? parseOutputSplit(splitSelected, splitValues, t) : undefined;
+      if (splitBps) {
+        outputMode = 4;
+        if (splitBps[1] > 0) {
+          if (!validFixedRecipientsInput(recipientsText)) throw new Error(t("errors.fixedRecipients"));
+        } else recipients.length = 0;
+        if (splitBps[2] > 0) randomCount = parseRandomHolderCount(randomRecipientCount, t);
+      } else if (output === "retain") {
         if (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS)
           throw new Error(t("errors.retainWallet"));
         outputMode = 1;
@@ -3084,7 +3351,7 @@ function TaskRuleEditor({
         randomRecipientCount: randomCount,
         retainRecipient: recipient,
         recipients: recipients as Address[],
-      });
+      }, splitBps);
     } catch (nextError) {
       setFormError(nextError instanceof Error ? nextError.message : t("errors.amount"));
     }
@@ -3195,6 +3462,13 @@ function TaskRuleEditor({
       <div className="mt-4 border-t border-[#424746] pt-4">
         <p className="text-sm font-medium text-[#F1EAD9]">{t("labels.output")}</p>
         <p className="mt-1 text-xs leading-5 text-[#D5C585]">{t("help.editOutputRisk")}</p>
+        {isSplit ? <SplitOutputSelector
+          t={t}
+          selected={splitSelected}
+          onSelected={setSplitSelected}
+          values={splitValues}
+          onValues={setSplitValues}
+        /> : (
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
           {(["burn", "retain", "distribute"] as OutputMode[]).map((option) => (
             <Button
@@ -3212,8 +3486,36 @@ function TaskRuleEditor({
             </Button>
           ))}
         </div>
+        )}
       </div>
-      {output === "retain" ? (
+      {isSplit && splitSelected[1] ? (
+        <div className="mt-3">
+          <CompactField label={t("labels.fixedRecipients")} hint={t("help.recipients")}>
+            <textarea
+              value={recipientsText}
+              onChange={(event) => setRecipientsText(event.target.value)}
+              rows={3}
+              aria-invalid={splitFixedInvalid}
+              className={"w-full resize-y rounded-lg border bg-[#071015] px-3 py-2 font-mono text-xs text-[#F6F2E8] outline-none " +
+                (splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")}
+            />
+          </CompactField>
+        </div>
+      ) : null}
+      {isSplit && splitSelected[2] ? (
+        <div className="mt-3">
+          <CompactField label={t("labels.randomHolderCount")} hint={t("help.randomHolders")}>
+            <Input
+              value={randomRecipientCount}
+              onChange={(event) => setRandomRecipientCount(event.target.value)}
+              inputMode="numeric"
+              aria-invalid={splitRandomInvalid}
+              className={splitRandomInvalid ? "!border-[#D46A64] !text-[#FFBDB6]" : undefined}
+            />
+          </CompactField>
+        </div>
+      ) : null}
+      {!isSplit && output === "retain" ? (
         <div className="mt-3">
           <CompactField label={t("labels.retainWallet")} hint={t("help.retain")}>
             <Input
@@ -3224,7 +3526,7 @@ function TaskRuleEditor({
           </CompactField>
         </div>
       ) : null}
-      {output === "distribute" ? (
+      {!isSplit && output === "distribute" ? (
         <div className="mt-3 rounded-lg border border-[#5A481C] bg-[#100E09] p-3">
           <p className="text-sm font-medium text-[#F7E3A1]">{t("labels.distributionMode")}</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -3289,7 +3591,8 @@ function TaskRuleEditor({
           idleLabel={t("buttons.saveRules")}
           state={buttonState}
           onClick={submitRules}
-          disabled={!canWrite || fixedBnbInvalid || maxBnbInvalid || balancePercentageInvalid}
+          disabled={!canWrite || fixedBnbInvalid || maxBnbInvalid || balancePercentageInvalid ||
+            (isSplit && (!validOutputSplit(splitSelected, splitValues, t) || splitFixedInvalid || splitRandomInvalid))}
         />
       </div>
     </div>

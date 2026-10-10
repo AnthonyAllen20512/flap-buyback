@@ -165,7 +165,7 @@ contract FlapBoostVaultInvariantTest is StdInvariant, Test {
         vm.chainId(97);
         token = new VaultTestToken();
         FlapBoostVaultFactory factory = new FlapBoostVaultFactory();
-        FlapBoostVault addressBook = new FlapBoostVault(address(this), address(token));
+        FlapBoostVault addressBook = new FlapBoostVault(address(this), address(token), address(factory));
         vm.etch(addressBook.PORTAL_TESTNET(), address(new VaultTestPortal()).code);
         vm.etch(addressBook.TRIGGER_TESTNET(), address(new VaultTestTrigger()).code);
         triggerService = VaultTestTrigger(addressBook.TRIGGER_TESTNET());

@@ -2,8 +2,9 @@
 
 Standalone, user-funded BNB buybacks. This is **not** a tax-token Vault or
 VaultPortal integration. `FlapBoostVaultFactory` creates exactly one
-`FlapBoostVault` for each owner and target token. Burn, retain, and fixed-address
-distribution are operations inside that Vault; all use the same BNB balance.
+`FlapBoostVault` for each owner and target token. All operations use the same
+BNB balance. On the new testnet Factory, one round can split bought tokens
+between burn, fixed recipients, and generated addresses in any combination.
 
 ## Creation and funding
 
@@ -14,6 +15,18 @@ The Factory exposes three real operation modes:
   required BNB from a live Portal quote and the Vault's available balance.
 - `createBalancePercentageOperation(options, balanceBps, maxBNBPerRound)` spends a
   percentage of the post-fee shared balance, optionally capped.
+- `createSplitOperation(options, mode, amount, balanceBps, maxBNBPerRound, splitBps)`
+  buys once and distributes the received tokens according to three shares:
+  burn, fixed addresses, generated addresses. Shares are basis points and must
+  total 10,000. Fixed output is
+  divided among one to five unique addresses; generated output uses one to
+  twenty new synthetic addresses per round.
+
+The generated addresses are not actual token holders and have no usable private
+keys. Tokens sent to them are effectively unrecoverable. Rounding dust goes to
+the generated-address share when selected, otherwise the fixed-address share,
+otherwise burn. Split rules can be edited with `updateSplitOperation`; a change
+to an already-booked round takes effect after that round completes.
 
 All modes require `minTokensPerBNB`, a per-operation absolute price floor. This
 is not a same-transaction spot slippage setting. The Factory returns the shared
@@ -63,6 +76,9 @@ is rolled back before recording a failure and scheduling a retry.
 so a callback does not scan an unbounded list.
 The Portal and Trigger dependencies are selected from `block.chainid` for BSC
 mainnet 56 or BSC testnet 97; unsupported chains revert.
+The Factory deploys a dedicated `FlapBoostVaultDeployer` in its constructor to
+keep both runtime bytecodes below the EVM size limit. The deployer can only be
+called by its Factory; each Vault still authorizes its Factory for rule creation.
 
 ## Deployment and tests
 
@@ -72,9 +88,10 @@ funding order, refund timing, reservation safety, closure, and swap retry.
 
 Use `script/testnet/bnb/DeployFlapBoostTestnet.s.sol` to deploy the Factory
 on BSC testnet.
-Current testnet Factory (chain 97): `0x4fbb5bf97b05dc07083272dadb3207ec5f5288f4`
-([deployment transaction](https://testnet.bscscan.com/tx/0x81afa2166ead839f9528aa522c52624532ce982cc69b40157d0282888317e1ff)).
-This deployment creates Vaults with the per-booking fee and combined-fee guard.
+Current testnet Factory (chain 97): `0xF12C19d415b432268e201ea38fd93011F7a306F1`
+([deployment transaction](https://testnet.bscscan.com/tx/0xc54653eccc59de6c8a31bd407be7626be21ab0d7f15fce4df68ff2a066567555)).
+This deployment includes proportional output, the per-booking fee, and the
+combined-fee guard. Previous testnet Vaults remain under their original Factory.
 Set `FLAP_BOOST_DEPLOYER_PRIVATE_KEY` only in a trusted local environment; do
 not put it in scripts, source files, or chat logs. Update the mini-app manifest
 binding to the verified Factory address after deployment.

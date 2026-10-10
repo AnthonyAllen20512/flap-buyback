@@ -85,6 +85,8 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     address public immutable targetToken;
     Operation[] private _operations;
     mapping(uint256 => RuleUpdate) private _pendingRules;
+    mapping(uint256 => uint16[3]) private _outputSplits;
+    mapping(uint256 => uint16[3]) private _pendingOutputSplits;
     mapping(uint256 => bool) public hasPendingRules;
 
     uint256 public bookingFeeOwed;
@@ -121,10 +123,10 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         _;
     }
 
-    constructor(address owner_, address token_) {
-        require(owner_ != address(0) && token_.code.length != 0, "Invalid address");
+    constructor(address owner_, address token_, address factory_) {
+        require(owner_ != address(0) && factory_ != address(0) && token_.code.length != 0, "Invalid address");
         owner = owner_;
-        factory = msg.sender;
+        factory = factory_;
         targetToken = token_;
         _portal();
         _trigger();
@@ -143,6 +145,16 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         return _pendingRules[id];
     }
 
+    /// @notice Burn, retain and distribute shares in basis points. Zero for legacy outputs.
+    function outputSplit(uint256 id) external view returns (uint16[3] memory) {
+        return _outputSplits[id];
+    }
+
+    function pendingOutputSplit(uint256 id) external view returns (uint16[3] memory) {
+        require(hasPendingRules[id], "No pending rules");
+        return _pendingOutputSplits[id];
+    }
+
     function availableBNB() public view returns (uint256) {
         return address(this).balance - reservedBNB - bookingFeeOwed;
     }
@@ -150,6 +162,21 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     /// @dev The factory is the only creator; the token and owner never change.
     function addOperation(OperationConfig calldata config) external returns (uint256 id) {
         require(msg.sender == factory, "Only factory");
+        uint16[3] memory empty;
+        return _addOperation(config, empty);
+    }
+
+    function addSplitOperation(OperationConfig calldata config, uint16[3] calldata splitBps)
+        external returns (uint256 id)
+    {
+        require(msg.sender == factory, "Only factory");
+        require(config.outputMode == 4, "Not split output");
+        return _addOperation(config, splitBps);
+    }
+
+    function _addOperation(OperationConfig calldata config, uint16[3] memory splitBps)
+        private returns (uint256 id)
+    {
         require(_operations.length < MAX_OPERATIONS, "Too many operations");
         _validate(
             config.buyMode,
@@ -162,7 +189,8 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
             config.outputMode,
             config.randomRecipientCount,
             config.retainRecipient,
-            config.recipients
+            config.recipients,
+            splitBps
         );
         id = _operations.length;
         _operations.push();
@@ -177,6 +205,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         op.outputMode = config.outputMode;
         op.randomRecipientCount = config.randomRecipientCount;
         op.retainRecipient = config.retainRecipient;
+        _outputSplits[id] = splitBps;
         op.active = true;
         for (uint256 i; i < config.recipients.length; ++i) {
             op.recipients.push(config.recipients[i]);
@@ -185,6 +214,19 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     }
 
     function updateOperation(uint256 id, RuleUpdate calldata update) external onlyOwner {
+        uint16[3] memory splitBps;
+        if (update.outputMode == 4) splitBps = _outputSplits[id];
+        _updateOperation(id, update, splitBps);
+    }
+
+    function updateSplitOperation(uint256 id, RuleUpdate calldata update, uint16[3] calldata splitBps)
+        external onlyOwner
+    {
+        require(update.outputMode == 4, "Not split output");
+        _updateOperation(id, update, splitBps);
+    }
+
+    function _updateOperation(uint256 id, RuleUpdate calldata update, uint16[3] memory splitBps) private {
         Operation storage op = _operations[id];
         require(op.active && !callbackInProgress, "Unavailable");
         _validate(
@@ -198,14 +240,16 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
             update.outputMode,
             update.randomRecipientCount,
             update.retainRecipient,
-            update.recipients
+            update.recipients,
+            splitBps
         );
         if ((triggerId != 0 && scheduledOperationId == id) || (pendingTokens != 0 && pendingOperationId == id)) {
             _pendingRules[id] = update;
+            _pendingOutputSplits[id] = splitBps;
             hasPendingRules[id] = true;
             emit OperationUpdateQueued(id);
         } else {
-            _applyRules(id, update);
+            _applyRules(id, update, splitBps);
             _trySchedule();
         }
     }
@@ -271,6 +315,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         op.active = false;
         op.paused = true;
         delete _pendingRules[id];
+        delete _pendingOutputSplits[id];
         hasPendingRules[id] = false;
         emit OperationState(id, false, true);
         _trySchedule();
@@ -366,8 +411,28 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
             for (uint256 i; i < op.recipients.length; ++i) {
                 IERC20(targetToken).safeTransfer(op.recipients[i], base + (i < remainder ? 1 : 0));
             }
-        } else {
+        } else if (op.outputMode == 3) {
             _distributeToRandomHolders(id, op, amount);
+        } else {
+            uint16[3] memory shares = _outputSplits[id];
+            uint256 burnAmount = Math.mulDiv(amount, shares[0], BPS);
+            uint256 fixedAmount = Math.mulDiv(amount, shares[1], BPS);
+            uint256 randomAmount = amount - burnAmount - fixedAmount;
+            if (shares[2] == 0) {
+                if (shares[1] != 0) fixedAmount += randomAmount;
+                else burnAmount += randomAmount;
+                randomAmount = 0;
+            }
+            if (burnAmount != 0) IERC20(targetToken).safeTransfer(BURN_ADDRESS, burnAmount);
+            if (fixedAmount != 0) {
+                uint256 base = fixedAmount / op.recipients.length;
+                uint256 remainder = fixedAmount % op.recipients.length;
+                for (uint256 i; i < op.recipients.length; ++i) {
+                    uint256 share = base + (i < remainder ? 1 : 0);
+                    if (share != 0) IERC20(targetToken).safeTransfer(op.recipients[i], share);
+                }
+            }
+            if (randomAmount != 0) _distributeToRandomHolders(id, op, randomAmount);
         }
         op.totalTokensOutput += amount;
     }
@@ -579,12 +644,14 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     function _applyPendingRules(uint256 id) private {
         if (!hasPendingRules[id] || (pendingTokens != 0 && pendingOperationId == id)) return;
         RuleUpdate memory update = _pendingRules[id];
+        uint16[3] memory splitBps = _pendingOutputSplits[id];
         delete _pendingRules[id];
+        delete _pendingOutputSplits[id];
         hasPendingRules[id] = false;
-        _applyRules(id, update);
+        _applyRules(id, update, splitBps);
     }
 
-    function _applyRules(uint256 id, RuleUpdate memory update) private {
+    function _applyRules(uint256 id, RuleUpdate memory update, uint16[3] memory splitBps) private {
         Operation storage op = _operations[id];
         op.fixedBNBPerRound = update.fixedBNBPerRound;
         op.fixedTokenAmountPerRound = update.fixedTokenAmountPerRound;
@@ -594,6 +661,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         op.outputMode = update.outputMode;
         op.randomRecipientCount = update.randomRecipientCount;
         op.retainRecipient = update.retainRecipient;
+        _outputSplits[id] = splitBps;
         delete op.recipients;
         for (uint256 i; i < update.recipients.length; ++i) {
             op.recipients.push(update.recipients[i]);
@@ -638,7 +706,8 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         uint8 output,
         uint8 randomRecipientCount,
         address retain,
-        address[] memory recipients
+        address[] memory recipients,
+        uint16[3] memory splitBps
     ) private pure {
         require(floor != 0 && interval_ >= MIN_INTERVAL, "Invalid floor or interval");
         if (mode == BuyMode.FIXED_BNB) {
@@ -648,7 +717,19 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         } else {
             require(fixedBNB == 0 && fixedTokens == 0 && balanceBps_ != 0 && balanceBps_ <= BPS, "Invalid BPS mode");
         }
-        require(output <= 3, "Invalid output");
+        require(output <= 4, "Invalid output");
+        if (output < 4) {
+            require(splitBps[0] == 0 && splitBps[1] == 0 && splitBps[2] == 0, "Unexpected split");
+        } else {
+            require(uint256(splitBps[0]) + splitBps[1] + splitBps[2] == BPS, "Invalid split");
+            require(splitBps[0] != 0 || splitBps[1] != 0 || splitBps[2] != 0, "Empty split");
+            require(splitBps[0] <= BPS && splitBps[1] <= BPS && splitBps[2] <= BPS, "Invalid share");
+            require(retain == address(0), "Invalid retain share");
+            if (splitBps[1] == 0) require(recipients.length == 0, "Unexpected fixed addresses");
+            else require(recipients.length > 0 && recipients.length <= 5, "Invalid fixed addresses");
+            if (splitBps[2] == 0) require(randomRecipientCount == 0, "Unexpected random addresses");
+            else require(randomRecipientCount != 0 && randomRecipientCount <= MAX_RANDOM_RECIPIENTS, "Invalid random addresses");
+        }
         if (output == 0) {
             require(retain == address(0) && recipients.length == 0 && randomRecipientCount == 0, "Invalid burn");
         } else if (output == 1) {
@@ -658,7 +739,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
                 retain == address(0) && recipients.length > 0 && recipients.length <= 5 && randomRecipientCount == 0,
                 "Invalid distribute"
             );
-        } else {
+        } else if (output == 3) {
             require(
                 retain == address(0) && recipients.length == 0 && randomRecipientCount != 0
                     && randomRecipientCount <= MAX_RANDOM_RECIPIENTS,

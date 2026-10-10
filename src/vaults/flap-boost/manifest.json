@@ -10,7 +10,7 @@
     "bindings": [
       {
         "chainId": 97,
-        "factoryAddress": "0x4fbb5bf97b05dc07083272dadb3207ec5f5288f4",
+        "factoryAddress": "0xF12C19d415b432268e201ea38fd93011F7a306F1",
         "tokenAddresses": ["0x2865d202f0378df0f23c855a0b09b61721918888"],
         "externalContracts": [
           {

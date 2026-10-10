@@ -109,7 +109,7 @@ contract FlapBoostVaultTest is Test {
         token = new VaultTestToken();
         factory = new FlapBoostVaultFactory();
         VaultTestPortal portalImplementation = new VaultTestPortal();
-        FlapBoostVault addressBook = new FlapBoostVault(OWNER, address(token));
+        FlapBoostVault addressBook = new FlapBoostVault(OWNER, address(token), address(factory));
         triggerService = VaultTestTrigger(addressBook.TRIGGER_TESTNET());
         vm.etch(addressBook.PORTAL_TESTNET(), address(portalImplementation).code);
         vm.etch(address(triggerService), address(new VaultTestTrigger()).code);
@@ -479,6 +479,111 @@ contract FlapBoostVaultTest is Test {
         assertEq(token.balanceOf(carol), 5 ether);
     }
 
+    function testSingleRoundSplitsBoughtTokensAcrossBurnFixedAndGeneratedAddresses() public {
+        address bob = address(0xB0B);
+        address carol = address(0xCA401);
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 4, address(0));
+        options.recipients = new address[](2);
+        options.recipients[0] = bob;
+        options.recipients[1] = carol;
+        options.randomRecipientCount = 3;
+        uint16[3] memory shares = [uint16(5_000), uint16(3_000), uint16(2_000)];
+        vm.prank(OWNER);
+        uint256 beforeGas = gasleft();
+        (address address_, uint256 id) = factory.createSplitOperation(
+            options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, shares
+        );
+        assertLt(beforeGas - gasleft(), 4_800_000);
+        FlapBoostVault vault = FlapBoostVault(payable(address_));
+        assertEq(vault.factory(), address(factory));
+        assertEq(vault.outputSplit(id)[0], 5_000);
+        vm.prank(OWNER);
+        vault.fund{value: 0.1 ether}();
+        vm.prank(OWNER);
+        vault.startOperation(id);
+        assertEq(token.balanceOf(BURN), 5 ether);
+        assertEq(token.balanceOf(bob), 1.5 ether);
+        assertEq(token.balanceOf(carol), 1.5 ether);
+        assertEq(vault.getOperation(id).totalTokensOutput, 10 ether);
+        assertEq(vault.getOperation(id).randomDistributionRounds, 1);
+        assertEq(vault.getOperation(id).totalRandomHolders, 3);
+        assertEq(token.balanceOf(address(vault)), 0);
+    }
+
+    function testSplitMustTotalOneHundredPercent() public {
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 4, address(0));
+        uint16[3] memory shares = [uint16(9_000), uint16(0), uint16(0)];
+        vm.prank(OWNER);
+        vm.expectRevert("Invalid split");
+        factory.createSplitOperation(options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, shares);
+    }
+
+    function testSplitCreationAcceptsTokenTargetAndBalancePercentageModes() public {
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 4, address(0));
+        uint16[3] memory burnOnly = [uint16(10_000), uint16(0), uint16(0)];
+        vm.prank(OWNER);
+        (address address_, uint256 tokenTargetId) = factory.createSplitOperation(
+            options, FlapBoostVault.BuyMode.FIXED_TOKEN_AMOUNT, 100 ether, 0, 0, burnOnly
+        );
+        vm.prank(OWNER);
+        (address sameAddress, uint256 balanceId) = factory.createSplitOperation(
+            options, FlapBoostVault.BuyMode.BALANCE_BPS, 0, 2_500, 0.02 ether, burnOnly
+        );
+        assertEq(address_, sameAddress);
+        FlapBoostVault vault = FlapBoostVault(payable(address_));
+        assertEq(vault.getOperation(tokenTargetId).fixedTokenAmountPerRound, 100 ether);
+        assertEq(vault.getOperation(balanceId).balanceBps, 2_500);
+        assertEq(vault.getOperation(balanceId).maxBNBPerRound, 0.02 ether);
+    }
+
+    function testQueuedSplitUpdateAppliesAfterBookedRound() public {
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 4, address(0));
+        uint16[3] memory burnOnly = [uint16(10_000), uint16(0), uint16(0)];
+        vm.prank(OWNER);
+        (address address_, uint256 id) = factory.createSplitOperation(
+            options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, burnOnly
+        );
+        FlapBoostVault vault = FlapBoostVault(payable(address_));
+        vm.prank(OWNER);
+        vault.fund{value: 0.1 ether}();
+        vm.prank(OWNER);
+        vault.startOperation(id);
+        assertEq(token.balanceOf(BURN), 10 ether);
+
+        address bob = address(0xB0B);
+        address[] memory fixedRecipients = new address[](1);
+        fixedRecipients[0] = bob;
+        FlapBoostVault.RuleUpdate memory update = FlapBoostVault.RuleUpdate({
+            fixedBNBPerRound: 0.01 ether,
+            fixedTokenAmountPerRound: 0,
+            balanceBps: 0,
+            maxBNBPerRound: 0,
+            interval: 60,
+            outputMode: 4,
+            randomRecipientCount: 0,
+            retainRecipient: address(0),
+            recipients: fixedRecipients
+        });
+        uint16[3] memory mixed = [uint16(5_000), uint16(5_000), uint16(0)];
+        vm.prank(OWNER);
+        vault.updateSplitOperation(id, update, mixed);
+        assertTrue(vault.hasPendingRules(id));
+        assertEq(vault.pendingOutputSplit(id)[1], 5_000);
+
+        uint256 first = vault.triggerId();
+        vm.warp(triggerService.afterTime(first));
+        triggerService.fire(address(vault), first);
+        assertEq(token.balanceOf(BURN), 20 ether);
+        assertEq(token.balanceOf(bob), 0);
+        assertEq(vault.outputSplit(id)[1], 5_000);
+
+        uint256 second = vault.triggerId();
+        vm.warp(triggerService.afterTime(second));
+        triggerService.fire(address(vault), second);
+        assertEq(token.balanceOf(BURN), 25 ether);
+        assertEq(token.balanceOf(bob), 5 ether);
+    }
+
     function testRandomDistributionCreatesDistinctSyntheticHolders() public {
         FlapBoostVaultFactory.OperationOptions memory options = _options(60, 3, address(0));
         options.randomRecipientCount = 3;
@@ -589,6 +694,29 @@ contract FlapBoostVaultTest is Test {
         options.randomRecipientCount = 20;
         vm.prank(OWNER);
         (address address_, uint256 id) = factory.createFixedBNBOperation(options, 0.01 ether);
+        FlapBoostVault vault = FlapBoostVault(payable(address_));
+        vm.prank(OWNER);
+        vault.fund{value: 0.1 ether}();
+        vm.prank(OWNER);
+        vault.startOperation(id);
+        uint256 requestId = vault.triggerId();
+        vm.warp(triggerService.afterTime(requestId));
+        uint256 beforeGas = gasleft();
+        triggerService.fire(address(vault), requestId);
+        assertLt(beforeGas - gasleft(), 2_000_000);
+        assertEq(vault.getOperation(id).totalRandomHolders, 40);
+    }
+
+    function testMaximumSplitCallbackFitsTriggerGasCap() public {
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 4, address(0));
+        options.recipients = new address[](5);
+        for (uint256 i; i < 5; ++i) options.recipients[i] = address(uint160(0xB000 + i));
+        options.randomRecipientCount = 20;
+        uint16[3] memory shares = [uint16(1_000), uint16(4_000), uint16(5_000)];
+        vm.prank(OWNER);
+        (address address_, uint256 id) = factory.createSplitOperation(
+            options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, shares
+        );
         FlapBoostVault vault = FlapBoostVault(payable(address_));
         vm.prank(OWNER);
         vault.fund{value: 0.1 ether}();

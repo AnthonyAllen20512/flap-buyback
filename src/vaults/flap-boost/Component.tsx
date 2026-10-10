@@ -1927,7 +1927,6 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="boost-plaza-network rounded-full px-3 py-1 text-xs font-semibold">{networkLabel}</span>
-          <span className="text-xs text-[#AEB7B5]">{t("plaza.currentNetworkOnly")}</span>
         </div>
         <div className="flex items-center gap-3">
           {totalVaultCount !== null ? <span className="font-mono text-sm font-semibold text-[#E7CC87]">{t("plaza.totalCount", undefined, { count: totalVaultCount })}</span> : null}
@@ -1988,8 +1987,7 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
           <p className="mt-1 text-xs text-[#9FAAA7]">{t(searchTerm ? "plaza.noMatchHint" : "plaza.emptyHint")}</p>
         </div>
       ) : null}
-      {totalVaultCount !== null && totalVaultCount > 0 ? <div className="relative z-10 mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[11px] text-[#84918F]">{t(hasOlder ? "plaza.partialHistory" : "plaza.chainSource")}</p>
+      {totalVaultCount !== null && totalVaultCount > 0 && (totalPages > 1 || hasOlder) ? <div className="relative z-10 mt-4 flex flex-wrap items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           {totalPages > 1 ? (
             <>

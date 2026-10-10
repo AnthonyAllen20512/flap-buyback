@@ -2592,20 +2592,8 @@ function TaskForm({
   ];
   return (
     <div>
-      {splitOutputEnabled ? (
-        <section className="boost-form-step py-5">
-          <SectionHeading index="01" icon={<Flame className="h-4 w-4" />} title={t("labels.outputType")} />
-          <SplitOutputSelector
-            t={t}
-            selected={splitSelected}
-            onSelected={setSplitSelected}
-            values={splitValues}
-            onValues={setSplitValues}
-          />
-        </section>
-      ) : null}
       <section className="boost-form-step py-5">
-        <SectionHeading index={splitOutputEnabled ? "02" : "01"} icon={<Target className="h-4 w-4" />} title={t("labels.targetToken")} />
+        <SectionHeading index="01" icon={<Target className="h-4 w-4" />} title={t("labels.targetToken")} />
         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           {lockedToken ? (
             <div className="min-w-0 rounded-lg bg-[#071015] px-4 py-3 text-xs text-[#C2C2BB]">
@@ -2657,6 +2645,18 @@ function TaskForm({
         </p>
       ) : null}
       <fieldset disabled={!tokenReady} className={"m-0 min-w-0 border-0 p-0 " + (!tokenReady ? "opacity-45" : "")}>
+      {splitOutputEnabled ? (
+        <section className="boost-form-step py-5">
+          <SectionHeading index="02" icon={<Flame className="h-4 w-4" />} title={t("labels.outputType")} />
+          <SplitOutputSelector
+            t={t}
+            selected={splitSelected}
+            onSelected={setSplitSelected}
+            values={splitValues}
+            onValues={setSplitValues}
+          />
+        </section>
+      ) : null}
       <section className="boost-form-step py-5">
         <SectionHeading index={splitOutputEnabled ? "03" : "02"} icon={<Gauge className="h-4 w-4" />} title={t("labels.ruleSettings")} />
         <div className="mt-3 grid grid-cols-3 gap-2">
@@ -2971,24 +2971,10 @@ function SplitOutputSelector({
 
   function updateShare(index: number, raw: string) {
     if (!/^\d*$/.test(raw)) return;
+    const maximum = Math.max(0, 100 - values.reduce((sum, value, item) =>
+      item === index ? sum : sum + (Number(value) || 0), 0));
     const next = [...values] as SplitInputs;
-    if (raw === "" || Number(raw) > 100) {
-      next[index] = raw;
-      onSelected(next.map((value) => Number(value) > 0) as SplitSelections);
-      onValues(next);
-      return;
-    }
-    const amount = Number(raw);
-    const previous = Number(values[index]) || 0;
-    next[index] = String(amount);
-    let excess = Math.max(0, amount - previous - Math.max(0, 100 - total));
-    for (let item = 0; item < next.length && excess > 0; item += 1) {
-      if (item === index) continue;
-      const available = Number(next[item]) || 0;
-      const deducted = Math.min(excess, available);
-      next[item] = String(available - deducted);
-      excess -= deducted;
-    }
+    next[index] = raw === "" ? "" : String(Math.min(Number(raw), maximum));
     onSelected(next.map((value) => Number(value) > 0) as SplitSelections);
     onValues(next);
   }

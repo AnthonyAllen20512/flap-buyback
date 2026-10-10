@@ -2828,6 +2828,8 @@ function TaskRuleEditor({
   const enteredFixedBnb = mode === "fixed-bnb" && validBnbAmount(fixedBnb)
     ? parseTokenAmount(fixedBnb.trim(), 18)
     : null;
+  const fixedBnbInvalid = mode === "fixed-bnb" &&
+    (enteredFixedBnb === null || (minimumTrade !== null && enteredFixedBnb < minimumTrade));
 
   function submitRules() {
     try {
@@ -2840,6 +2842,11 @@ function TaskRuleEditor({
       if (mode === "fixed-bnb") {
         fixedBNBPerRound = parseAmount(fixedBnb, 18, t);
         if (fixedBNBPerRound <= 0n) throw new Error(t("errors.amount"));
+        if (minimumTrade !== null && fixedBNBPerRound < minimumTrade) {
+          throw new Error(t("errors.roundBelowTriggerMinimum", undefined, {
+            amount: formatTokenAmount(minimumTrade, 18),
+          }));
+        }
       } else if (mode === "fixed-token") {
         fixedTokenAmountPerRound = parseAmount(fixedTokens, task.token.decimals, t);
         if (fixedTokenAmountPerRound <= 0n) throw new Error(t("errors.amount"));
@@ -2906,7 +2913,15 @@ function TaskRuleEditor({
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         {mode === "fixed-bnb" ? (
           <CompactField label={t("labels.bnbPerRound")} hint={t("help.bnbPerRound")}>
-            <Input value={fixedBnb} onChange={(event) => setFixedBnb(event.target.value)} inputMode="decimal" />
+            <Input
+              value={fixedBnb}
+              onChange={(event) => setFixedBnb(event.target.value)}
+              inputMode="decimal"
+              aria-invalid={fixedBnbInvalid}
+              className={fixedBnbInvalid
+                ? "!border-[#D46A64] !text-[#FFBDB6] focus:!border-[#F18B82] focus:!ring-[#D46A64]/25"
+                : undefined}
+            />
           </CompactField>
         ) : null}
         {mode === "fixed-token" ? (
@@ -2944,11 +2959,11 @@ function TaskRuleEditor({
       {mode === "fixed-bnb" && minimumTrade !== null ? (
         <p className={
           "mt-3 rounded-lg border px-3 py-2 text-xs leading-5 " +
-          (enteredFixedBnb !== null && enteredFixedBnb < minimumTrade
-            ? "border-[#695734] bg-[#19170E] text-[#E2CEA1]"
+          (fixedBnbInvalid
+            ? "border-[#874A4A] bg-[#2A1518] text-[#FFB5AF]"
             : "border-[#29474D] bg-[#0D1B20] text-[#A9C7C6]")
         }>
-          {t(enteredFixedBnb !== null && enteredFixedBnb < minimumTrade
+          {t(fixedBnbInvalid
             ? "help.triggerFeeMinimumWarning"
             : "help.triggerFeeMinimum", undefined, {
             amount: formatTokenAmount(minimumTrade, 18),
@@ -3053,7 +3068,7 @@ function TaskRuleEditor({
           idleLabel={t("buttons.saveRules")}
           state={buttonState}
           onClick={submitRules}
-          disabled={!canWrite}
+          disabled={!canWrite || fixedBnbInvalid}
         />
       </div>
     </div>

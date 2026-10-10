@@ -21,9 +21,9 @@ forge build
 forge test --no-match-path '*.mainnet.t.sol' -vv
 ```
 
-本次 GitHub 同步使用 `solc 0.8.26`、Cancun、optimizer 200 和 via IR 对本目录源码及测试依赖进行编译检查：0 个错误、0 个警告，Vault 与 Factory 均生成字节码。当前执行环境没有 Forge，因此上述 Foundry 功能和属性测试未在本次同步时重新运行。
+本次使用 Foundry 1.8.5、`solc 0.8.26`、Cancun、optimizer 200 和 via IR 编译并运行本地套件；主网 fork 单独标记跳过。
 
-本地套件包含 22 项功能回归、3 项 fuzz 属性测试（各 200 runs）及 2 项 stateful invariant（各 200 runs、depth 32）。验证原生 BNB 资金守恒、共享预约金额保护、退款、一次性启动费、输出计数、权限及生命周期。
+本地套件包含 26 项功能回归、3 项 fuzz 属性测试（各 200 runs）及 2 项 stateful invariant（各 200 runs、depth 32）。验证原生 BNB 资金守恒、共享预约金额保护、退款、逐次预约收费、失败预约不收费、输出计数、权限及生命周期。
 
 主网 fork 单独运行，不使用私钥、不广播交易：
 
@@ -45,7 +45,7 @@ forge test --match-path 'test/FlapBoostVault.mainnet.t.sol' -vv
 
 ## 对参考报告的逐项对应
 
-- R1：本版本最低间隔为 1 分钟，UI 默认 60 分钟，不存在税收池 20 秒循环。后续自动轮次要求预约金额至少为当时 Trigger 费的 20 倍；低于门槛时暂缓预约，不消耗服务费。首轮直接执行，不支付 Trigger 费。
+- R1：本版本最低间隔为 1 分钟，UI 默认 60 分钟，不存在税收池 20 秒循环。后续自动轮次要求回购金额至少为当时 Trigger 费与固定 0.0001 BNB 预约费合计的 20 倍；当前 Trigger 费为 0.0002 BNB 时门槛为 0.006 BNB。低于门槛时暂缓预约，不支付费用。首轮直接执行本身不收预约费；成功预约下一轮时才收费。
 - R2：附完整 `test/`、`foundry.toml`、`remappings.txt` 与依赖；补充 200-run fuzz/invariant。主网 fork 未验证属于未完成项，不能据此声称已满足全部规则 006。
 - W1：Portal 与 Trigger 已按 chain ID 硬编码，不接收部署者自定义服务地址。主网 Trigger 为 `0xcf4EE25035CF883895110f367F5BA8172416a7F9`，主网 Portal 为 `0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0`。
 - W2：没有公开的 `minOut=0` 超时 swap 路径；每轮使用非零绝对价格底线，固定数量还要求实际收到指定数量。官方 Trigger 状态为 `FAILED` 时，所有者可释放预约并重订；`PENDING` 请求没有超时释放入口，因为官方服务不保证精确执行时间。**固定 BNB / 固定数量模式尚无协议级 BNB 绝对上限；服务长期不回调时预约资金可能持续锁定。**请列入审计范围。
@@ -57,10 +57,10 @@ forge test --match-path 'test/FlapBoostVault.mainnet.t.sol' -vv
 
 - 暂停或关闭缺资金的队首操作后，继续尝试预约下一条操作。
 - 实际到账数量小于 minimum 时，回滚整个 self-call 中的 Portal swap，避免不足数量被当作正常输出再次转出。
-- 每个 Vault 的全部操作共用资金和一个预约；预约金额及未付启动费不可提现。
+- 每个 Vault 的全部操作共用资金和一个预约；预约金额及未付预约费不可提现。
 - 定量买入直接按代币数量询价，UI 不再要求额外填写 BNB 上限。
 - 所有者可在充值交易中尝试首轮回购，无需充值后再次确认启动；小额充值保留在金库，后续补足再试。
-- 自动轮次增加 Trigger 费 20 倍门槛；Mini App 读取官方请求状态，仅对证明 `FAILED` 的请求显示所有者恢复入口。`PENDING` 不显示恢复按钮。
+- 自动轮次按合计费用实施 20 倍门槛；每次成功预约收取 0.0001 BNB，失败预约不收。Mini App 读取官方请求状态，仅对证明 `FAILED` 的请求显示所有者恢复入口。`PENDING` 不显示恢复按钮。
 
 ## 需要重点审查的既有设计
 
@@ -72,7 +72,7 @@ forge test --match-path 'test/FlapBoostVault.mainnet.t.sol' -vv
 
 ## 部署与交付
 
-UI manifest 当前绑定测试网 Factory `0x1F063Be383faBFFCC209Cb5Cf96334D0dD55048a`（[部署交易](https://testnet.bscscan.com/tx/0x73ad15f3ecdc43857d060b1181a4ba7e0136c6796f8d80ab996fdbca0cccb22e)）。本次 GitHub 同步未重新验证该链上部署与仓库源码的字节码一致性，正式审计时应单独复核。主网代码路径保留，但 manifest 尚未设置正式主网 Factory；主网上线需独立部署并绑定。
+UI manifest 当前绑定测试网 Factory `0x095814ef73e8cdd740ecadd604b61370e3d5343f`（[部署交易](https://testnet.bscscan.com/tx/0x24d541408ea7b68555f9ccbffc5c37e5909a775cab87568c68bfc9c8cf956801)）。本地 `forge inspect` 的 Factory 运行时代码与链上 `eth_getCode` 完全一致；正式审计仍应独立复核。主网代码路径保留，但 manifest 尚未设置正式主网 Factory；主网上线需独立部署并绑定。
 
 UI 四文件 zip 是审核源码交付，不是带 Workbench 格式标记的生产上传包。合约包不包含 `.env`、私钥、钱包文件、`broadcast/`、`out/`、`cache/` 或 `.git/`；SHA256 清单标识实际交付内容。
 

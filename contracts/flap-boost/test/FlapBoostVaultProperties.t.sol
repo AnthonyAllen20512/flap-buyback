@@ -54,14 +54,14 @@ contract FlapBoostVaultFuzzTest is FlapBoostPropertyFixture {
         assertEq(address(vault).balance, deposited - withdrawn);
         assertEq(vault.availableBNB(), deposited - withdrawn);
         assertEq(OWNER.balance, beforeOwner - deposited + withdrawn);
-        assertFalse(vault.startFeeCharged());
+        assertEq(vault.bookingFeeOwed(), 0);
         assertEq(vault.triggerId(), 0);
     }
 
-    function testFuzz_RefundStartFeeAndReservationConservation(uint16 refundBps) public {
+    function testFuzz_RefundBookingFeeAndReservationConservation(uint16 refundBps) public {
         refundBps = uint16(bound(refundBps, 0, 10_000));
         VaultTestPortal(vault.PORTAL_TESTNET()).setRefundBps(refundBps);
-        uint256 feeReceiverBefore = vault.START_FEE_RECEIVER().balance;
+        uint256 feeReceiverBefore = vault.BOOKING_FEE_RECEIVER().balance;
         vm.startPrank(OWNER);
         vault.fund{value: 1 ether}();
         vault.startOperation(0);
@@ -69,9 +69,9 @@ contract FlapBoostVaultFuzzTest is FlapBoostPropertyFixture {
         uint256 input = 0.01 ether;
         uint256 spent = input - (input * uint256(refundBps)) / 10_000;
         assertEq(vault.getOperation(0).totalBNBSpent, spent);
-        assertEq(address(vault).balance + spent + address(triggerService).balance + vault.START_FEE(), 1 ether);
-        assertEq(vault.START_FEE_RECEIVER().balance - feeReceiverBefore, vault.START_FEE());
-        assertEq(vault.availableBNB() + vault.reservedBNB() + vault.startFeeOwed(), address(vault).balance);
+        assertEq(address(vault).balance + spent + address(triggerService).balance + vault.BOOKING_FEE(), 1 ether);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance - feeReceiverBefore, vault.BOOKING_FEE());
+        assertEq(vault.availableBNB() + vault.reservedBNB() + vault.bookingFeeOwed(), address(vault).balance);
     }
 
     function testFuzz_NonOwnerCannotWithdraw(address caller, uint256 amount) public {
@@ -171,7 +171,7 @@ contract FlapBoostVaultInvariantTest is StdInvariant, Test {
         triggerService = VaultTestTrigger(addressBook.TRIGGER_TESTNET());
         handler = new FlapBoostInvariantHandler(factory, token, triggerService);
         vault = handler.vault();
-        initialFeeReceiverBalance = vault.START_FEE_RECEIVER().balance;
+        initialFeeReceiverBalance = vault.BOOKING_FEE_RECEIVER().balance;
         vm.deal(address(handler), 10_000 ether);
         bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = handler.deposit.selector;
@@ -188,12 +188,12 @@ contract FlapBoostVaultInvariantTest is StdInvariant, Test {
     function invariant_BnbConservationAcrossAllOperations() public view {
         uint256 spent;
         for (uint256 i; i < vault.operationCount(); ++i) spent += vault.getOperation(i).totalBNBSpent;
-        uint256 paidStartFee = vault.START_FEE_RECEIVER().balance - initialFeeReceiverBalance;
+        uint256 paidBookingFees = vault.BOOKING_FEE_RECEIVER().balance - initialFeeReceiverBalance;
         assertEq(
-            address(vault).balance + spent + handler.withdrawn() + address(triggerService).balance + paidStartFee,
+            address(vault).balance + spent + handler.withdrawn() + address(triggerService).balance + paidBookingFees,
             handler.deposited()
         );
-        assertEq(vault.availableBNB() + vault.reservedBNB() + vault.startFeeOwed(), address(vault).balance);
+        assertEq(vault.availableBNB() + vault.reservedBNB() + vault.bookingFeeOwed(), address(vault).balance);
         assertLe(vault.reservedBNB(), address(vault).balance);
         assertLe(vault.operationCount(), vault.MAX_OPERATIONS());
     }

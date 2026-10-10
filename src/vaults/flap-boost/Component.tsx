@@ -56,7 +56,8 @@ async function mapInBatches<T, U>(
 const PRICE_FLOOR_BPS = 7_000n;
 const BPS_DENOMINATOR = 10_000n;
 const ONE_BNB = 10n ** 18n;
-const TRIGGER_TRADE_FEE_MULTIPLIER = 20n;
+const TOTAL_FEE_TRADE_MULTIPLIER = 20n;
+const BOOKING_FEE = 100_000_000_000_000n;
 // Keep wallet-submitted limits below the testnet node's per-transaction cap.
 // The same limit is used for simulation, so insufficient gas fails before signing.
 const CREATE_OPERATION_GAS = 4_800_000n;
@@ -112,11 +113,10 @@ interface TaskSnapshot {
   active: boolean;
   paused: boolean;
   started: boolean;
-  startFeeCharged: boolean;
-  startFeeOwed: bigint;
-  startFee: bigint;
+  bookingFeeOwed: bigint;
+  bookingFee: bigint;
   triggerFee: bigint | null;
-  triggerFeeMultiplier: bigint | null;
+  totalFeeMultiplier: bigint | null;
   pendingRuleUpdate: TaskRuleUpdate | null;
   callbackInProgress: boolean;
   consecutiveFailures: number;
@@ -184,12 +184,12 @@ type TaskConfig =
   | { mode: "balance-percentage"; options: TaskOptions; balanceBps: number; maxBNBPerRound: bigint };
 
 function taskTotalBNB(task: TaskSnapshot) {
-  return task.availableBNB + task.reservedBNB + task.startFeeOwed;
+  return task.availableBNB + task.reservedBNB + task.bookingFeeOwed;
 }
 
 function triggerTradeMinimum(task: TaskSnapshot): bigint | null {
-  if (task.triggerFee === null || task.triggerFeeMultiplier === null || task.triggerFee === 0n) return null;
-  return task.triggerFee * task.triggerFeeMultiplier;
+  if (task.triggerFee === null || task.totalFeeMultiplier === null) return null;
+  return (task.triggerFee + task.bookingFee) * task.totalFeeMultiplier;
 }
 
 function feeGuardCause(task: TaskSnapshot): "round" | "cap" | null {
@@ -202,9 +202,7 @@ function feeGuardCause(task: TaskSnapshot): "round" | "cap" | null {
 
 function canStartTask(task: TaskSnapshot) {
   if (!task.active || task.paused || task.started || task.callbackInProgress || task.pendingTokens > 0n) return false;
-  const fee = task.startFeeCharged ? 0n : task.startFee;
-  if (task.availableBNB <= fee) return false;
-  const budget = task.availableBNB - fee;
+  const budget = task.availableBNB;
   if (task.buyMode === 0) return budget >= task.fixedBNBPerRound;
   if (task.buyMode === 1) return budget > 0n;
   return (budget * BigInt(task.balanceBps)) / 10_000n > 0n;
@@ -223,7 +221,7 @@ function taskStatusKey(task: TaskSnapshot) {
   if (task.availableBNB === 0n || (task.buyMode === 0 && task.availableBNB < task.fixedBNBPerRound))
     return "states.needsFunding";
   if (task.buyMode === 0 && task.triggerFee !== null &&
-      task.availableBNB < task.fixedBNBPerRound + task.triggerFee) return "states.needsFunding";
+      task.availableBNB < task.fixedBNBPerRound + task.triggerFee + task.bookingFee) return "states.needsFunding";
   return task.consecutiveFailures ? "states.retryNeeded" : "states.awaitingSchedule";
 }
 
@@ -536,9 +534,10 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     [loadedIdentity, readIdentity, taskSnapshots],
   );
   const currentTriggerFee = triggerFeeSnapshot?.chainId === context.chainId ? triggerFeeSnapshot.fee : null;
-  const creationFeeMultiplier = tasks.find((task) => task.triggerFeeMultiplier !== null)?.triggerFeeMultiplier
-    ?? TRIGGER_TRADE_FEE_MULTIPLIER;
-  const creationMinimumTrade = currentTriggerFee === null ? null : currentTriggerFee * creationFeeMultiplier;
+  const creationFeeMultiplier = tasks.find((task) => task.totalFeeMultiplier !== null)?.totalFeeMultiplier
+    ?? TOTAL_FEE_TRADE_MULTIPLIER;
+  const creationTotalFee = currentTriggerFee === null ? null : currentTriggerFee + BOOKING_FEE;
+  const creationMinimumTrade = creationTotalFee === null ? null : creationTotalFee * creationFeeMultiplier;
   const taskReadState = !context.userAddress ? "disconnected" : loadedIdentity === readIdentity ? readState : "loading";
   const canWrite = Boolean(
     context.userAddress && factoryAddress && taskReadState === "ready" && !wrongNetwork && activeAction === null,
@@ -834,10 +833,9 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           owner,
           targetToken,
           count,
-          startFeeCharged,
-          startFeeOwed,
-          startFee,
-          triggerFeeMultiplier,
+          bookingFeeOwed,
+          bookingFee,
+          totalFeeMultiplier,
           callbackInProgress,
           triggerId,
           scheduledId,
@@ -849,19 +847,13 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           sdk.readContract<Address>({ contract: "boostVault", address, abi: vaultAbi, functionName: "owner" }),
           sdk.readContract<Address>({ contract: "boostVault", address, abi: vaultAbi, functionName: "targetToken" }),
           sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "operationCount" }),
-          sdk.readContract<boolean>({
-            contract: "boostVault",
-            address,
-            abi: vaultAbi,
-            functionName: "startFeeCharged",
-          }),
-          sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "startFeeOwed" }),
-          sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "START_FEE" }),
+          sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "bookingFeeOwed" }),
+          sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "BOOKING_FEE" }),
           sdk.readContract<bigint>({
             contract: "boostVault",
             address,
             abi: vaultAbi,
-            functionName: "MIN_TRIGGER_TRADE_FEE_MULTIPLIER",
+            functionName: "MIN_TOTAL_FEE_TRADE_MULTIPLIER",
           }).catch(() => null),
           sdk.readContract<boolean>({
             contract: "boostVault",
@@ -913,10 +905,9 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           owner,
           token: { address: targetToken, symbol: symbol || "TOKEN", decimals },
           count: Number(count),
-          startFeeCharged,
-          startFeeOwed,
-          startFee,
-          triggerFeeMultiplier,
+          bookingFeeOwed,
+          bookingFee,
+          totalFeeMultiplier,
           callbackInProgress,
           triggerId,
           triggerFailed,
@@ -973,11 +964,10 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           active: operation.active,
           paused: operation.paused,
           started: operation.started,
-          startFeeCharged: vault.startFeeCharged,
-          startFeeOwed: vault.startFeeOwed,
-          startFee: vault.startFee,
+          bookingFeeOwed: vault.bookingFeeOwed,
+          bookingFee: vault.bookingFee,
           triggerFee,
-          triggerFeeMultiplier: vault.triggerFeeMultiplier,
+          totalFeeMultiplier: vault.totalFeeMultiplier,
           pendingRuleUpdate,
           callbackInProgress: vault.callbackInProgress,
           consecutiveFailures: operation.consecutiveFailures,
@@ -1616,7 +1606,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     buyMode={buyMode}
                     setBuyMode={setBuyMode}
                     minimumTrade={creationMinimumTrade}
-                    triggerFee={currentTriggerFee}
+                    totalFee={creationTotalFee}
                     feeMultiplier={creationFeeMultiplier}
                     bnbPerRound={bnbPerRound}
                     setBnbPerRound={setBnbPerRound}
@@ -2332,7 +2322,7 @@ function TaskForm({
   buyMode,
   setBuyMode,
   minimumTrade,
-  triggerFee,
+  totalFee,
   feeMultiplier,
   bnbPerRound,
   setBnbPerRound,
@@ -2367,7 +2357,7 @@ function TaskForm({
   buyMode: BuyMode;
   setBuyMode: (value: BuyMode) => void;
   minimumTrade: bigint | null;
-  triggerFee: bigint | null;
+  totalFee: bigint | null;
   feeMultiplier: bigint;
   bnbPerRound: string;
   setBnbPerRound: (value: string) => void;
@@ -2399,7 +2389,7 @@ function TaskForm({
     (maxBnbValue === null || (minimumTrade !== null && maxBnbValue > 0n && maxBnbValue < minimumTrade));
   const balanceBps = percentageBpsOrNull(balancePercentage);
   const balancePercentageInvalid = buyMode === "balance-percentage" && balanceBps === null;
-  const requiredBalance = minimumBalanceForPercentage(triggerFee, minimumTrade, balanceBps);
+  const requiredBalance = minimumBalanceForPercentage(totalFee, minimumTrade, balanceBps);
   const outputOptions: Array<{ value: OutputMode; label: string }> = [
     { value: "burn", label: t("outputs.burn") },
     { value: "retain", label: t("outputs.retain") },
@@ -2524,6 +2514,16 @@ function TaskForm({
         <p className="mt-2 text-xs leading-5 text-[#A4AAA8]">
           {buybackModes.find((mode) => mode.value === buyMode)?.detail}
         </p>
+        {totalFee !== null && minimumTrade !== null ? (
+          <p className="mt-2 text-xs leading-5 text-[#C2AE7C]">
+            {t("help.bookingFees", undefined, {
+              trigger: formatTokenAmount(totalFee - BOOKING_FEE, 18, 18),
+              booking: formatTokenAmount(BOOKING_FEE, 18, 18),
+              total: formatTokenAmount(totalFee, 18, 18),
+              minimum: formatTokenAmount(minimumTrade, 18, 18),
+            })}
+          </p>
+        ) : null}
         <div className={"mt-4 grid gap-3 sm:grid-cols-2 " + (buyMode === "balance-percentage" ? "lg:grid-cols-3" : "")}>
           {buyMode === "fixed-bnb" ? (
             <Field label={t("labels.bnbPerRound")}>
@@ -3015,7 +3015,9 @@ function TaskRuleEditor({
     (enteredMaxBnb === null || (minimumTrade !== null && enteredMaxBnb > 0n && enteredMaxBnb < minimumTrade));
   const balanceBps = percentageBpsOrNull(balanceShare);
   const balancePercentageInvalid = mode === "balance-percentage" && balanceBps === null;
-  const requiredBalance = minimumBalanceForPercentage(task.triggerFee, minimumTrade, balanceBps);
+  const requiredBalance = minimumBalanceForPercentage(
+    task.triggerFee === null ? null : task.triggerFee + task.bookingFee, minimumTrade, balanceBps,
+  );
 
   function submitRules() {
     try {
@@ -3101,6 +3103,16 @@ function TaskRuleEditor({
         <span className="text-xs font-semibold tracking-[0.08em] text-[#84D9D3]">{buyModeLabel(t, task.buyMode)}</span>
         <span className="text-xs text-[#9AB3B3]">{t("help.editModeFixed")}</span>
       </div>
+      {task.triggerFee !== null && minimumTrade !== null ? (
+        <p className="mt-3 text-xs leading-5 text-[#C2AE7C]">
+          {t("help.bookingFees", undefined, {
+            trigger: formatTokenAmount(task.triggerFee, 18, 18),
+            booking: formatTokenAmount(task.bookingFee, 18, 18),
+            total: formatTokenAmount(task.triggerFee + task.bookingFee, 18, 18),
+            minimum: formatTokenAmount(minimumTrade, 18, 18),
+          })}
+        </p>
+      ) : null}
       <div className={"mt-3 grid gap-3 sm:grid-cols-2 " + (mode === "balance-percentage" ? "lg:grid-cols-3" : "")}>
         {mode === "fixed-bnb" ? (
           <CompactField label={t("labels.bnbPerRound")}>
@@ -3181,7 +3193,7 @@ function TaskRuleEditor({
             ? "help.triggerFeeMinimumWarning"
             : "help.triggerFeeMinimum", undefined, {
             amount: formatTokenAmount(minimumTrade, 18, 18),
-            multiplier: task.triggerFeeMultiplier?.toString() ?? "",
+            multiplier: task.totalFeeMultiplier?.toString() ?? "",
           })}
         </p>
       ) : null}
@@ -3514,11 +3526,6 @@ function TaskFunding({
         ) : !task.started ? (
           <>
             <p className="mt-2 text-xs leading-5 text-[#A4AAA8]">{t("help.firstDirect")}</p>
-            {!task.startFeeCharged ? (
-              <p className="mt-1 text-xs text-[#E1C68A]">
-                {t("help.startFee", undefined, { amount: formatTokenAmount(task.startFee, 18) })}
-              </p>
-            ) : null}
             {isOwner && canStartTask(task) ? (
               <TxButton
                 className={GOLD_SECONDARY_BUTTON + " mt-3 h-10 w-full rounded-lg px-3 text-xs"}
@@ -3558,7 +3565,7 @@ function TaskFunding({
               <p className="mt-2 rounded-lg border border-[#695734] bg-[#19170E] px-3 py-2 text-xs leading-5 text-[#E2CEA1]">
                 {t(feeGuardCause(task) === "cap" ? "states.feeGuardCapHint" : "states.feeGuardHint", undefined, {
                   amount: formatTokenAmount(minimumTrade, 18, 18),
-                  multiplier: task.triggerFeeMultiplier?.toString() ?? "",
+                  multiplier: task.totalFeeMultiplier?.toString() ?? "",
                 })}
               </p>
             ) : taskStatusKey(task) === "states.needsFunding" ? (

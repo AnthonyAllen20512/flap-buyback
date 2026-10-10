@@ -1,6 +1,6 @@
 # Flap Buyback 回购项目
 
-本仓库同时包含 [Flap Boost Mini App 界面](./src/vaults/flap-boost/)与 [Solidity 合约、Foundry 测试](./contracts/flap-boost/)。当前 UI 读取 BSC 测试网 Factory `0x1F063Be383faBFFCC209Cb5Cf96334D0dD55048a`。合约保留 BNB Chain 主网路径；UI manifest 目前尚未绑定主网 Factory。
+本仓库同时包含 [Flap Boost Mini App 界面](./src/vaults/flap-boost/)与 [Solidity 合约、Foundry 测试](./contracts/flap-boost/)。当前 UI 读取 BSC 测试网 Factory `0x095814ef73e8cdd740ecadd604b61370e3d5343f`。合约保留 BNB Chain 主网路径；UI manifest 目前尚未绑定主网 Factory。
 
 界面预览执行 `yarn dev -p 3001`。合约在 `contracts/flap-boost` 目录执行 `forge build` 和 `forge test --no-match-path '*.mainnet.t.sol'`；目录内附有依赖源码与许可证。范围及测试限制见[合约说明](./contracts/flap-boost/README.md)和[送审说明](./contracts/flap-boost/AUDIT_SUBMISSION.md)。
 

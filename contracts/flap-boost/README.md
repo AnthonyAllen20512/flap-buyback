@@ -30,21 +30,21 @@ The Mini App calls `fundAndTryStart(id)` so the owner's funding transaction
 also attempts the first round. If the balance is insufficient, the deposit
 stays in the shared Vault; a later top-up tries again. `startOperation(id)`
 remains available for BNB already deposited by another route. The first round
-executes directly, without a Trigger. The first operation start pays **one** hardcoded
-0.0001 BNB startup fee to
-`0x439CEed9DBA171857e6A0b16705e3880c4ff131e`. Later operations in the
-same Vault do not pay that startup fee again. A successful round schedules one
-future Trigger only if the shared balance covers the current Trigger fee and
-that operation's reserved buyback budget, and the round is at least 20 times
-the Trigger fee. Each new request pays one dynamic
-Trigger fee. When the balance is insufficient, no new Trigger is booked; a
+executes directly, without a Trigger booking fee. Each successfully booked
+automatic request pays the dynamic Trigger fee plus a fixed 0.0001 BNB booking
+fee to `0x439CEed9DBA171857e6A0b16705e3880c4ff131e`. A reverted or
+zero-ID booking does not charge the fixed booking fee. The Vault schedules only if the shared balance
+covers both fees and the reserved buyback budget, and the round is at least 20
+times the combined fees (0.006 BNB at a 0.0002 BNB Trigger fee). Each later
+successful booking, including a retry after a failed request, pays again. When
+the balance is insufficient, no new Trigger is booked; a
 later `fund()` or `poke()` retries scheduling.
 
 If the official Trigger reports a request as `FAILED`, the owner can call
 `recoverFailedTrigger()` to release its reservation and attempt a fresh booking.
 A merely late `PENDING` request cannot be cleared this way: the service does
 not guarantee an exact execution time, so clearing it could create two live
-requests. The failed request's original fee is not refunded.
+requests. The failed request's original Trigger and booking fees are not refunded.
 
 One Trigger queue serves the entire Vault, with at most one outstanding request.
 Operations are selected by the earliest `nextEligibleAt` (operation ID breaks
@@ -67,16 +67,14 @@ mainnet 56 or BSC testnet 97; unsupported chains revert.
 ## Deployment and tests
 
 Run `forge test` before deployment. The Foundry suite covers shared Vault
-identity, one-time startup fee, combined funding and first direct execution, the three buy modes,
+identity, per-booking fee, combined funding and first direct execution, the three buy modes,
 funding order, refund timing, reservation safety, closure, and swap retry.
 
 Use `script/testnet/bnb/DeployFlapBoostTestnet.s.sol` to deploy the Factory
 on BSC testnet.
-Current testnet Factory (chain 97): `0x1F063Be383faBFFCC209Cb5Cf96334D0dD55048a`
-([deployment transaction](https://testnet.bscscan.com/tx/0x73ad15f3ecdc43857d060b1181a4ba7e0136c6796f8d80ab996fdbca0cccb22e)).
-This deployment includes the queue-head wakeup, net-token minimum,
-combined funding/start, Trigger fee guard, failed-request recovery, and public
-Vault pagination for the buyback plaza.
+Current testnet Factory (chain 97): `0x095814ef73e8cdd740ecadd604b61370e3d5343f`
+([deployment transaction](https://testnet.bscscan.com/tx/0x24d541408ea7b68555f9ccbffc5c37e5909a775cab87568c68bfc9c8cf956801)).
+This deployment creates Vaults with the per-booking fee and combined-fee guard.
 Set `FLAP_BOOST_DEPLOYER_PRIVATE_KEY` only in a trusted local environment; do
 not put it in scripts, source files, or chat logs. Update the mini-app manifest
 binding to the verified Factory address after deployment.

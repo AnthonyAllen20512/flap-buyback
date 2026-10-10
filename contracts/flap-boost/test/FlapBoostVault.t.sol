@@ -59,6 +59,8 @@ contract VaultTestPortal {
 
 contract VaultTestTrigger {
     uint256 public lastId;
+    bool public failRequest;
+    bool public returnZero;
     mapping(uint256 => uint64) public afterTime;
     mapping(uint256 => address) public requester;
     mapping(uint256 => uint8) public status;
@@ -67,8 +69,13 @@ contract VaultTestTrigger {
         return 0.0002 ether;
     }
 
+    function setFailRequest(bool value) external { failRequest = value; }
+    function setReturnZero(bool value) external { returnZero = value; }
+
     function requestTrigger(uint64 executeAfter) external payable returns (uint256 id) {
         require(msg.value == 0.0002 ether, "Wrong fee");
+        require(!failRequest, "Request failed");
+        if (returnZero) return 0;
         id = ++lastId;
         afterTime[id] = executeAfter;
         requester[id] = msg.sender;
@@ -132,7 +139,7 @@ contract FlapBoostVaultTest is Test {
         return (FlapBoostVault(payable(address_)), operationId);
     }
 
-    function testOneTokenOneVaultAndOneStartFee() public {
+    function testOneTokenOneVaultAndOneFeePerBooking() public {
         (FlapBoostVault vault, uint256 firstId) = _create(0.01 ether, 60);
         (FlapBoostVault sameVault, uint256 secondId) = _create(0.02 ether, 120);
         assertEq(address(vault), address(sameVault));
@@ -144,16 +151,16 @@ contract FlapBoostVaultTest is Test {
         vm.prank(OWNER);
         vault.fund{value: 0.1 ether}();
         assertEq(triggerService.lastId(), 0);
-        uint256 receiverBefore = vault.START_FEE_RECEIVER().balance;
+        uint256 receiverBefore = vault.BOOKING_FEE_RECEIVER().balance;
         vm.prank(OWNER);
         vault.startOperation(firstId);
-        assertEq(vault.START_FEE_RECEIVER().balance - receiverBefore, 0.0001 ether);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance - receiverBefore, vault.BOOKING_FEE());
         assertEq(triggerService.lastId(), 1);
         assertEq(token.balanceOf(BURN), 10 ether);
 
         vm.prank(OWNER);
         vault.startOperation(secondId);
-        assertEq(vault.START_FEE_RECEIVER().balance - receiverBefore, 0.0001 ether);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance - receiverBefore, vault.BOOKING_FEE());
         assertEq(triggerService.lastId(), 1);
         assertEq(token.balanceOf(BURN), 30 ether);
     }
@@ -185,12 +192,12 @@ contract FlapBoostVaultTest is Test {
 
     function testFundingStartsFirstRoundWithoutSecondWalletAction() public {
         (FlapBoostVault vault,) = _create(0.01 ether, 60);
-        uint256 receiverBefore = vault.START_FEE_RECEIVER().balance;
+        uint256 receiverBefore = vault.BOOKING_FEE_RECEIVER().balance;
         vm.prank(OWNER);
         vault.fundAndTryStart{value: 0.1 ether}(0);
         assertTrue(vault.getOperation(0).started);
         assertEq(vault.getOperation(0).totalBNBSpent, 0.01 ether);
-        assertEq(vault.START_FEE_RECEIVER().balance - receiverBefore, vault.START_FEE());
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance - receiverBefore, vault.BOOKING_FEE());
         assertGt(vault.triggerId(), 0);
         assertEq(vault.reservedBNB(), 0.01 ether);
     }
@@ -201,7 +208,7 @@ contract FlapBoostVaultTest is Test {
         vault.fundAndTryStart{value: 0.005 ether}(0);
         assertFalse(vault.getOperation(0).started);
         assertEq(vault.availableBNB(), 0.005 ether);
-        assertFalse(vault.startFeeCharged());
+        assertEq(vault.bookingFeeOwed(), 0);
         vm.prank(OWNER);
         vault.fundAndTryStart{value: 0.03 ether}(0);
         assertTrue(vault.getOperation(0).started);
@@ -210,11 +217,47 @@ contract FlapBoostVaultTest is Test {
 
     function testTinyRoundCannotConsumeDisproportionateTriggerFees() public {
         (FlapBoostVault vault,) = _create(0.001 ether, 60);
+        uint256 receiverBefore = vault.BOOKING_FEE_RECEIVER().balance;
         vm.prank(OWNER);
         vault.fundAndTryStart{value: 0.1 ether}(0);
         assertEq(vault.getOperation(0).totalBNBSpent, 0.001 ether);
         assertEq(vault.triggerId(), 0);
         assertEq(triggerService.lastId(), 0);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance, receiverBefore);
+    }
+
+    function testEachSuccessfulAutomaticBookingPaysAgain() public {
+        (FlapBoostVault vault,) = _create(0.01 ether, 60);
+        uint256 receiverBefore = vault.BOOKING_FEE_RECEIVER().balance;
+        vm.prank(OWNER);
+        vault.fundAndTryStart{value: 0.1 ether}(0);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance - receiverBefore, 0.0001 ether);
+        uint256 firstRequest = vault.triggerId();
+        vm.warp(triggerService.afterTime(firstRequest));
+        triggerService.fire(address(vault), firstRequest);
+        assertEq(triggerService.lastId(), 2);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance - receiverBefore, 0.0002 ether);
+        assertEq(vault.bookingFeeOwed(), 0);
+    }
+
+    function testRejectedOrZeroRequestDoesNotChargeBookingFee() public {
+        (FlapBoostVault vault,) = _create(0.01 ether, 60);
+        uint256 receiverBefore = vault.BOOKING_FEE_RECEIVER().balance;
+        triggerService.setFailRequest(true);
+        vm.prank(OWNER);
+        vault.fundAndTryStart{value: 0.1 ether}(0);
+        assertEq(vault.getOperation(0).totalBNBSpent, 0.01 ether);
+        assertEq(vault.triggerId(), 0);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance, receiverBefore);
+        triggerService.setFailRequest(false);
+        triggerService.setReturnZero(true);
+        vault.poke();
+        assertEq(vault.triggerId(), 0);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance, receiverBefore);
+        triggerService.setReturnZero(false);
+        vault.poke();
+        assertEq(vault.triggerId(), 1);
+        assertEq(vault.BOOKING_FEE_RECEIVER().balance - receiverBefore, vault.BOOKING_FEE());
     }
 
     function testEditingRuleAutomaticallyBooksWhenFeeGuardClears() public {
@@ -236,9 +279,13 @@ contract FlapBoostVaultTest is Test {
         });
         vm.prank(OWNER);
         vault.updateOperation(0, update);
+        assertEq(vault.triggerId(), 0);
+        update.fixedBNBPerRound = 0.006 ether;
+        vm.prank(OWNER);
+        vault.updateOperation(0, update);
 
         assertEq(vault.triggerId(), 1);
-        assertEq(vault.reservedBNB(), 0.004 ether);
+        assertEq(vault.reservedBNB(), 0.006 ether);
         assertEq(triggerService.afterTime(1), vault.getOperation(0).nextEligibleAt);
     }
 
@@ -329,7 +376,7 @@ contract FlapBoostVaultTest is Test {
 
     function testInsufficientNetTokensRollsBackSwapBeforeRetry() public {
         vm.prank(OWNER);
-        (address vaultAddress, uint256 id) = factory.createFixedTokenAmountOperation(_options(60, 0, address(0)), 5 ether);
+        (address vaultAddress, uint256 id) = factory.createFixedTokenAmountOperation(_options(60, 0, address(0)), 6 ether);
         FlapBoostVault vault = FlapBoostVault(payable(vaultAddress));
         VaultTestPortal portal = VaultTestPortal(vault.PORTAL_TESTNET());
         portal.setDeliveryBps(5000);
@@ -348,8 +395,8 @@ contract FlapBoostVaultTest is Test {
         uint256 booked = vault.triggerId();
         vm.warp(triggerService.afterTime(booked));
         triggerService.fire(address(vault), booked);
-        assertEq(vault.getOperation(id).totalBNBSpent, 0.005 ether);
-        assertEq(token.balanceOf(BURN), 5 ether);
+        assertEq(vault.getOperation(id).totalBNBSpent, 0.006 ether);
+        assertEq(token.balanceOf(BURN), 6 ether);
     }
 
     function testNewOperationWithEarlierDueTimeRunsFirst() public {
@@ -381,7 +428,7 @@ contract FlapBoostVaultTest is Test {
         vault.startOperation(id);
         assertEq(vault.getOperation(id).totalBNBSpent, 0.005 ether);
         assertEq(token.balanceOf(BURN), 5 ether);
-        assertEq(vault.reservedBNB(), 0.005 ether);
+        assertEq(vault.reservedBNB(), 0);
 
         vm.prank(OWNER);
         (, uint256 percentageId) = factory.createBalancePercentageOperation(options, 5000, 0);

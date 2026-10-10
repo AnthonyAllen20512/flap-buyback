@@ -12,13 +12,13 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     using SafeERC20 for IERC20;
 
     uint16 private constant BPS = 10_000;
-    uint256 public constant START_FEE = 0.0001 ether;
-    uint256 public constant MIN_TRIGGER_TRADE_FEE_MULTIPLIER = 20;
+    uint256 public constant BOOKING_FEE = 0.0001 ether;
+    uint256 public constant MIN_TOTAL_FEE_TRADE_MULTIPLIER = 20;
     uint256 public constant MAX_OPERATIONS = 24;
     uint8 public constant MAX_RANDOM_RECIPIENTS = 20;
     uint64 public constant MIN_INTERVAL = 1 minutes;
     uint64 public constant RETRY_BASE_DELAY = 5 minutes;
-    address public constant START_FEE_RECEIVER = 0x439CEed9DBA171857e6A0b16705e3880c4ff131e;
+    address public constant BOOKING_FEE_RECEIVER = 0x439CEed9DBA171857e6A0b16705e3880c4ff131e;
     address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
     address public constant PORTAL_MAINNET = 0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0;
     address public constant PORTAL_TESTNET = 0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9;
@@ -87,8 +87,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     mapping(uint256 => RuleUpdate) private _pendingRules;
     mapping(uint256 => bool) public hasPendingRules;
 
-    bool public startFeeCharged;
-    uint256 public startFeeOwed;
+    uint256 public bookingFeeOwed;
     bool public callbackInProgress;
     bool private _schedulingInProgress;
     uint256 public triggerId;
@@ -108,8 +107,9 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     );
     event ScheduleDeferred(uint256 indexed operationId, uint64 executeAfter);
     event FailedTriggerRecovered(uint256 indexed requestId);
-    event StartFeePaid(uint256 amount);
-    event StartFeeDeferred(uint256 amount);
+    event BookingFeeAccrued(uint256 indexed requestId, uint256 amount);
+    event BookingFeePaid(uint256 amount);
+    event BookingFeeDeferred(uint256 amount);
     event Buyback(uint256 indexed operationId, uint256 bnbSpent, uint256 tokens, uint256 minOutput);
     event OutputDeferred(uint256 indexed operationId, uint256 tokens);
     event RandomHolderDistribution(
@@ -144,7 +144,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     }
 
     function availableBNB() public view returns (uint256) {
-        return address(this).balance - reservedBNB - startFeeOwed;
+        return address(this).balance - reservedBNB - bookingFeeOwed;
     }
 
     /// @dev The factory is the only creator; the token and owner never change.
@@ -234,14 +234,9 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
             _trySchedule();
             return;
         }
-        uint256 firstFee = startFeeCharged ? 0 : START_FEE;
         uint256 balance = availableBNB();
-        if (balance <= firstFee) {
-            _trySchedule();
-            return;
-        }
-        uint256 budget = _roundReservation(op, balance - firstFee);
-        if (budget == 0 || budget > balance - firstFee) {
+        uint256 budget = _roundReservation(op, balance);
+        if (budget == 0 || budget > balance) {
             _trySchedule();
             return;
         }
@@ -281,26 +276,19 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         _trySchedule();
     }
 
-    /// @notice First round is direct, without a Trigger. The fixed fee is paid once per Vault.
+    /// @notice First round is direct, without a Trigger or booking fee.
     function startOperation(uint256 id) external onlyOwner nonReentrant {
         Operation storage op = _operations[id];
         require(op.active && !op.paused && !op.started && !callbackInProgress && pendingTokens == 0, "Unavailable");
-        uint256 firstFee = startFeeCharged ? 0 : START_FEE;
         uint256 balance = availableBNB();
-        require(balance > firstFee, "No budget");
-        uint256 budget = _roundReservation(op, balance - firstFee);
-        require(budget != 0 && budget <= balance - firstFee, "No budget");
+        uint256 budget = _roundReservation(op, balance);
+        require(budget != 0 && budget <= balance, "No budget");
         _startWithBudget(id, budget);
     }
 
     function _startWithBudget(uint256 id, uint256 budget) private {
         Operation storage op = _operations[id];
         op.started = true;
-        if (!startFeeCharged) {
-            startFeeCharged = true;
-            startFeeOwed = START_FEE;
-            _payStartFee();
-        }
         callbackInProgress = true;
         _tryExecuteRound(id, budget);
     }
@@ -403,9 +391,9 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         _trySchedule();
     }
 
-    function settleStartFee() external nonReentrant {
-        require(startFeeOwed != 0, "No fee owed");
-        _payStartFee();
+    function settleBookingFee() external nonReentrant {
+        require(bookingFeeOwed != 0, "No fee owed");
+        _payBookingFee();
     }
 
     function _executeRound(uint256 id, uint256 reservation) private {
@@ -473,7 +461,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
     }
 
     function _trySchedule() private {
-        if (callbackInProgress || _schedulingInProgress || triggerId != 0 || !startFeeCharged) return;
+        if (callbackInProgress || _schedulingInProgress || triggerId != 0) return;
         (bool found, uint256 id) = pendingTokens != 0 ? (true, pendingOperationId) : _earliestOperation();
         if (!found) return;
         Operation storage op = _operations[id];
@@ -485,13 +473,15 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
             emit ScheduleDeferred(id, when);
             return;
         }
-        uint256 balance = address(this).balance - startFeeOwed;
-        if (balance < fee) return;
-        uint256 reservation = pendingTokens != 0 ? 0 : _roundReservation(op, balance - fee);
-        if (pendingTokens == 0 && (reservation == 0 || reservation > balance - fee)) return;
-        if (pendingTokens == 0 && fee != 0 &&
-            (fee > type(uint256).max / MIN_TRIGGER_TRADE_FEE_MULTIPLIER ||
-             reservation < fee * MIN_TRIGGER_TRADE_FEE_MULTIPLIER)) {
+        if (fee > type(uint256).max - BOOKING_FEE) return;
+        uint256 totalFee = fee + BOOKING_FEE;
+        uint256 balance = availableBNB();
+        if (balance < totalFee) return;
+        uint256 reservation = pendingTokens != 0 ? 0 : _roundReservation(op, balance - totalFee);
+        if (pendingTokens == 0 && (reservation == 0 || reservation > balance - totalFee)) return;
+        if (pendingTokens == 0 &&
+            (totalFee > type(uint256).max / MIN_TOTAL_FEE_TRADE_MULTIPLIER ||
+             reservation < totalFee * MIN_TOTAL_FEE_TRADE_MULTIPLIER)) {
             emit ScheduleDeferred(id, when);
             return;
         }
@@ -506,7 +496,10 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
                 triggerId = requestId;
                 scheduledOperationId = id;
                 triggerIsRecovery = pendingTokens != 0;
+                bookingFeeOwed += BOOKING_FEE;
                 emit Scheduled(requestId, id, fee, when, reservation);
+                emit BookingFeeAccrued(requestId, BOOKING_FEE);
+                _payBookingFee();
             }
         } catch {
             _schedulingInProgress = false;
@@ -568,18 +561,18 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         }
     }
 
-    function _payStartFee() private {
-        uint256 amount = startFeeOwed;
+    function _payBookingFee() private {
+        uint256 amount = bookingFeeOwed;
         if (amount == 0) return;
-        startFeeOwed = 0;
+        bookingFeeOwed = 0;
         bool paid;
-        address receiver = START_FEE_RECEIVER;
+        address receiver = BOOKING_FEE_RECEIVER;
         assembly { paid := call(30000, receiver, amount, 0, 0, 0, 0) }
         if (paid) {
-            emit StartFeePaid(amount);
+            emit BookingFeePaid(amount);
         } else {
-            startFeeOwed = amount;
-            emit StartFeeDeferred(amount);
+            bookingFeeOwed = amount;
+            emit BookingFeeDeferred(amount);
         }
     }
 

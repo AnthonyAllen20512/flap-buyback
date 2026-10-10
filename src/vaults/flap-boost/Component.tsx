@@ -2953,6 +2953,7 @@ function TaskRuleEditor({
             : "help.triggerFeeMinimum", undefined, {
             amount: formatTokenAmount(minimumTrade, 18),
             fee: formatTokenAmount(task.triggerFee ?? 0n, 18),
+            multiplier: task.triggerFeeMultiplier?.toString() ?? "",
           })}
         </p>
       ) : null}
@@ -3318,6 +3319,7 @@ function TaskFunding({
                 {t("states.feeGuardHint", undefined, {
                   amount: formatTokenAmount(minimumTrade, 18),
                   fee: formatTokenAmount(task.triggerFee ?? 0n, 18),
+                  multiplier: task.triggerFeeMultiplier?.toString() ?? "",
                 })}
               </p>
             ) : taskStatusKey(task) === "states.needsFunding" ? (

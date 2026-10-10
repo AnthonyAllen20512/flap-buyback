@@ -56,6 +56,7 @@ async function mapInBatches<T, U>(
 const PRICE_FLOOR_BPS = 7_000n;
 const BPS_DENOMINATOR = 10_000n;
 const ONE_BNB = 10n ** 18n;
+const TRIGGER_TRADE_FEE_MULTIPLIER = 20n;
 const GOLD_PRIMARY_BUTTON =
   "boost-cta text-[#211907] [--ui20-chamfer-bg:#E8C874] [--ui20-chamfer-border:#F4D994] shadow-[0_12px_28px_-16px_rgba(232,200,116,0.8)] hover:[--ui20-chamfer-bg:#F7DFA0] hover:[--ui20-chamfer-border:#FFE7AD]";
 const GOLD_SECONDARY_BUTTON =
@@ -186,6 +187,14 @@ function triggerTradeMinimum(task: TaskSnapshot): bigint | null {
   return task.triggerFee * task.triggerFeeMultiplier;
 }
 
+function feeGuardCause(task: TaskSnapshot): "round" | "cap" | null {
+  const minimumTrade = triggerTradeMinimum(task);
+  if (minimumTrade === null) return null;
+  if (task.buyMode === 0 && task.fixedBNBPerRound < minimumTrade) return "round";
+  if (task.buyMode === 2 && task.maxBNBPerRound > 0n && task.maxBNBPerRound < minimumTrade) return "cap";
+  return null;
+}
+
 function canStartTask(task: TaskSnapshot) {
   if (!task.active || task.paused || task.started || task.callbackInProgress || task.pendingTokens > 0n) return false;
   const fee = task.startFeeCharged ? 0n : task.startFee;
@@ -205,9 +214,7 @@ function taskStatusKey(task: TaskSnapshot) {
   if (task.triggerFailed) return "states.triggerFailed";
   if (task.triggerId) return task.consecutiveFailures ? "states.retryScheduled" : "states.scheduled";
   if (task.vaultTriggerId || task.pendingTokens > 0n) return "states.queued";
-  const minimumTrade = triggerTradeMinimum(task);
-  if (task.buyMode === 0 && minimumTrade !== null && task.fixedBNBPerRound < minimumTrade)
-    return "states.feeGuard";
+  if (feeGuardCause(task)) return "states.feeGuard";
   if (task.availableBNB === 0n || (task.buyMode === 0 && task.availableBNB < task.fixedBNBPerRound))
     return "states.needsFunding";
   if (task.buyMode === 0 && task.triggerFee !== null &&
@@ -236,6 +243,15 @@ function validBnbAmount(value: string, maximum?: bigint) {
     return amount > 0n && (maximum === undefined || amount <= maximum);
   } catch {
     return false;
+  }
+}
+
+function optionalBnbAmount(value: string): bigint | null {
+  if (!value.trim()) return 0n;
+  try {
+    return parseAmount(value, 18, (key) => key);
+  } catch {
+    return null;
   }
 }
 
@@ -400,6 +416,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const { context, i18n } = sdk;
   const t = i18n.t;
   const [taskSnapshots, setTasks] = useState<TaskSnapshot[]>([]);
+  const [triggerFeeSnapshot, setTriggerFeeSnapshot] = useState<{ chainId: number; fee: bigint | null } | null>(null);
   const [readState, setTaskReadState] = useState<"loading" | "disconnected" | "ready" | "error">("loading");
   const [loadedIdentity, setLoadedIdentity] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -465,6 +482,10 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     () => (loadedIdentity === readIdentity ? taskSnapshots : []),
     [loadedIdentity, readIdentity, taskSnapshots],
   );
+  const currentTriggerFee = triggerFeeSnapshot?.chainId === context.chainId ? triggerFeeSnapshot.fee : null;
+  const creationFeeMultiplier = tasks.find((task) => task.triggerFeeMultiplier !== null)?.triggerFeeMultiplier
+    ?? TRIGGER_TRADE_FEE_MULTIPLIER;
+  const creationMinimumTrade = currentTriggerFee === null ? null : currentTriggerFee * creationFeeMultiplier;
   const taskReadState = !context.userAddress ? "disconnected" : loadedIdentity === readIdentity ? readState : "loading";
   const canWrite = Boolean(
     context.userAddress && factoryAddress && taskReadState === "ready" && !wrongNetwork && activeAction === null,
@@ -598,6 +619,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       if (buyMode === "fixed-bnb") {
         const amount = parseAmount(bnbPerRound, 18, t);
         if (amount <= 0n) throw new Error(t("errors.amount"));
+        if (creationMinimumTrade === null) throw new Error(t("errors.triggerFeeUnavailable"));
+        if (amount < creationMinimumTrade) {
+          throw new Error(t("errors.roundBelowTriggerMinimum", undefined, {
+            amount: formatTokenAmount(creationMinimumTrade, 18, 18),
+          }));
+        }
         return { mode: buyMode, options, bnbPerRound: amount };
       }
       if (buyMode === "fixed-token") {
@@ -608,6 +635,14 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       const balanceBps = parsePercentageToBps(balancePercentage, t);
       const optionalMaxBNB = maxBnbPerRound.trim() ? parseAmount(maxBnbPerRound, 18, t) : 0n;
       if (optionalMaxBNB < 0n) throw new Error(t("errors.amount"));
+      if (optionalMaxBNB > 0n) {
+        if (creationMinimumTrade === null) throw new Error(t("errors.triggerFeeUnavailable"));
+        if (optionalMaxBNB < creationMinimumTrade) {
+          throw new Error(t("errors.capBelowTriggerMinimum", undefined, {
+            amount: formatTokenAmount(creationMinimumTrade, 18, 18),
+          }));
+        }
+      }
       return { mode: buyMode, options, balanceBps, maxBNBPerRound: optionalMaxBNB };
     } catch (nextError) {
       return nextError instanceof Error ? nextError : new Error(t("errors.amount"));
@@ -616,6 +651,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     balancePercentage,
     bnbPerRound,
     buyMode,
+    creationMinimumTrade,
     distributionMode,
     intervalMinutes,
     maxBnbPerRound,
@@ -732,6 +768,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           args: [context.userAddress],
         }),
       ]);
+      if (requestId === requestRef.current) setTriggerFeeSnapshot({ chainId: context.chainId, fee: triggerFee });
       const vaultRows = await mapInBatches([...allVaultAddresses].reverse(), VAULT_READ_BATCH_SIZE, async (address) => {
         const [
           owner,
@@ -930,7 +967,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     } finally {
       if (requestId === requestRef.current) setRefreshing(false);
     }
-  }, [context.userAddress, factoryAddress, readIdentity, sdk, t, triggerAddress]);
+  }, [context.chainId, context.userAddress, factoryAddress, readIdentity, sdk, t, triggerAddress]);
 
   useEffect(() => {
     if (activeView === "plaza") return;
@@ -1499,6 +1536,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     onLoadToken={() => void loadToken(tokenAddressInput)}
                     buyMode={buyMode}
                     setBuyMode={setBuyMode}
+                    minimumTrade={creationMinimumTrade}
+                    feeMultiplier={creationFeeMultiplier}
                     bnbPerRound={bnbPerRound}
                     setBnbPerRound={setBnbPerRound}
                     tokenAmountPerRound={tokenAmountPerRound}
@@ -2213,6 +2252,8 @@ function TaskForm({
   onLoadToken,
   buyMode,
   setBuyMode,
+  minimumTrade,
+  feeMultiplier,
   bnbPerRound,
   setBnbPerRound,
   tokenAmountPerRound,
@@ -2244,6 +2285,8 @@ function TaskForm({
   onLoadToken: () => void;
   buyMode: BuyMode;
   setBuyMode: (value: BuyMode) => void;
+  minimumTrade: bigint | null;
+  feeMultiplier: bigint;
   bnbPerRound: string;
   setBnbPerRound: (value: string) => void;
   tokenAmountPerRound: string;
@@ -2266,6 +2309,12 @@ function TaskForm({
   setRandomRecipientCount: (value: string) => void;
 }) {
   const { context } = useFlapSdk();
+  const fixedBnbValue = validBnbAmount(bnbPerRound) ? parseTokenAmount(bnbPerRound.trim(), 18) : null;
+  const fixedBnbInvalid = buyMode === "fixed-bnb" &&
+    (fixedBnbValue === null || (minimumTrade !== null && fixedBnbValue < minimumTrade));
+  const maxBnbValue = optionalBnbAmount(maxBnbPerRound);
+  const maxBnbInvalid = buyMode === "balance-percentage" &&
+    (maxBnbValue === null || (minimumTrade !== null && maxBnbValue > 0n && maxBnbValue < minimumTrade));
   const outputOptions: Array<{ value: OutputMode; label: string }> = [
     { value: "burn", label: t("outputs.burn") },
     { value: "retain", label: t("outputs.retain") },
@@ -2392,6 +2441,10 @@ function TaskForm({
                 onChange={(event) => setBnbPerRound(event.target.value)}
                 inputMode="decimal"
                 placeholder={t("placeholders.bnb")}
+                aria-invalid={fixedBnbInvalid}
+                className={fixedBnbInvalid
+                  ? "!border-[#D46A64] !text-[#FFBDB6] focus:!border-[#F18B82] focus:!ring-[#D46A64]/25"
+                  : undefined}
               />
             </Field>
           ) : null}
@@ -2421,6 +2474,10 @@ function TaskForm({
                   onChange={(event) => setMaxBnbPerRound(event.target.value)}
                   inputMode="decimal"
                   placeholder={t("placeholders.bnbOptional")}
+                  aria-invalid={maxBnbInvalid}
+                  className={maxBnbInvalid
+                    ? "!border-[#D46A64] !text-[#FFBDB6] focus:!border-[#F18B82] focus:!ring-[#D46A64]/25"
+                    : undefined}
                 />
               </Field>
             </>
@@ -2434,6 +2491,21 @@ function TaskForm({
             />
           </Field>
         </div>
+        {minimumTrade !== null && fixedBnbInvalid && fixedBnbValue !== null ? (
+          <p className="mt-3 rounded-lg border border-[#874A4A] bg-[#2A1518] px-3 py-2 text-xs leading-5 text-[#FFB5AF]">
+            {t("help.triggerFeeMinimumWarning", undefined, {
+              amount: formatTokenAmount(minimumTrade, 18, 18),
+              multiplier: feeMultiplier.toString(),
+            })}
+          </p>
+        ) : null}
+        {minimumTrade !== null && maxBnbInvalid && maxBnbValue !== null ? (
+          <p className="mt-3 rounded-lg border border-[#874A4A] bg-[#2A1518] px-3 py-2 text-xs leading-5 text-[#FFB5AF]">
+            {t("errors.capBelowTriggerMinimum", undefined, {
+              amount: formatTokenAmount(minimumTrade, 18, 18),
+            })}
+          </p>
+        ) : null}
       </section>
 
       <section className="boost-form-step rounded-xl border border-[#3D4548] bg-[#10171E]/75 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(190,246,241,0.04)]">
@@ -2830,6 +2902,9 @@ function TaskRuleEditor({
     : null;
   const fixedBnbInvalid = mode === "fixed-bnb" &&
     (enteredFixedBnb === null || (minimumTrade !== null && enteredFixedBnb < minimumTrade));
+  const enteredMaxBnb = optionalBnbAmount(maxBnb);
+  const maxBnbInvalid = mode === "balance-percentage" &&
+    (enteredMaxBnb === null || (minimumTrade !== null && enteredMaxBnb > 0n && enteredMaxBnb < minimumTrade));
 
   function submitRules() {
     try {
@@ -2844,7 +2919,7 @@ function TaskRuleEditor({
         if (fixedBNBPerRound <= 0n) throw new Error(t("errors.amount"));
         if (minimumTrade !== null && fixedBNBPerRound < minimumTrade) {
           throw new Error(t("errors.roundBelowTriggerMinimum", undefined, {
-            amount: formatTokenAmount(minimumTrade, 18),
+            amount: formatTokenAmount(minimumTrade, 18, 18),
           }));
         }
       } else if (mode === "fixed-token") {
@@ -2854,6 +2929,11 @@ function TaskRuleEditor({
         balanceBps = parsePercentageToBps(balanceShare, t);
         maxBNBPerRound = maxBnb.trim() ? parseAmount(maxBnb, 18, t) : 0n;
         if (maxBNBPerRound < 0n) throw new Error(t("errors.amount"));
+        if (minimumTrade !== null && maxBNBPerRound > 0n && maxBNBPerRound < minimumTrade) {
+          throw new Error(t("errors.capBelowTriggerMinimum", undefined, {
+            amount: formatTokenAmount(minimumTrade, 18, 18),
+          }));
+        }
       }
 
       const recipients = recipientsText
@@ -2944,6 +3024,10 @@ function TaskRuleEditor({
                 onChange={(event) => setMaxBnb(event.target.value)}
                 inputMode="decimal"
                 placeholder={t("placeholders.bnbOptional")}
+                aria-invalid={maxBnbInvalid}
+                className={maxBnbInvalid
+                  ? "!border-[#D46A64] !text-[#FFBDB6] focus:!border-[#F18B82] focus:!ring-[#D46A64]/25"
+                  : undefined}
               />
             </CompactField>
           </>
@@ -2956,7 +3040,12 @@ function TaskRuleEditor({
           />
         </CompactField>
       </div>
-      {mode === "fixed-bnb" && minimumTrade !== null ? (
+      {mode === "fixed-bnb" && enteredFixedBnb === null ? (
+        <p className="mt-3 rounded-lg border border-[#874A4A] bg-[#2A1518] px-3 py-2 text-xs leading-5 text-[#FFB5AF]">
+          {t("errors.amount")}
+        </p>
+      ) : null}
+      {mode === "fixed-bnb" && minimumTrade !== null && enteredFixedBnb !== null ? (
         <p className={
           "mt-3 rounded-lg border px-3 py-2 text-xs leading-5 " +
           (fixedBnbInvalid
@@ -2966,8 +3055,20 @@ function TaskRuleEditor({
           {t(fixedBnbInvalid
             ? "help.triggerFeeMinimumWarning"
             : "help.triggerFeeMinimum", undefined, {
-            amount: formatTokenAmount(minimumTrade, 18),
+            amount: formatTokenAmount(minimumTrade, 18, 18),
             multiplier: task.triggerFeeMultiplier?.toString() ?? "",
+          })}
+        </p>
+      ) : null}
+      {mode === "balance-percentage" && enteredMaxBnb === null ? (
+        <p className="mt-3 rounded-lg border border-[#874A4A] bg-[#2A1518] px-3 py-2 text-xs leading-5 text-[#FFB5AF]">
+          {t("errors.amount")}
+        </p>
+      ) : null}
+      {mode === "balance-percentage" && minimumTrade !== null && maxBnbInvalid && enteredMaxBnb !== null ? (
+        <p className="mt-3 rounded-lg border border-[#874A4A] bg-[#2A1518] px-3 py-2 text-xs leading-5 text-[#FFB5AF]">
+          {t("errors.capBelowTriggerMinimum", undefined, {
+            amount: formatTokenAmount(minimumTrade, 18, 18),
           })}
         </p>
       ) : null}
@@ -3068,7 +3169,7 @@ function TaskRuleEditor({
           idleLabel={t("buttons.saveRules")}
           state={buttonState}
           onClick={submitRules}
-          disabled={!canWrite || fixedBnbInvalid}
+          disabled={!canWrite || fixedBnbInvalid || maxBnbInvalid}
         />
       </div>
     </div>
@@ -3330,8 +3431,8 @@ function TaskFunding({
           <>
             {taskStatusKey(task) === "states.feeGuard" && minimumTrade !== null ? (
               <p className="mt-2 rounded-lg border border-[#695734] bg-[#19170E] px-3 py-2 text-xs leading-5 text-[#E2CEA1]">
-                {t("states.feeGuardHint", undefined, {
-                  amount: formatTokenAmount(minimumTrade, 18),
+                {t(feeGuardCause(task) === "cap" ? "states.feeGuardCapHint" : "states.feeGuardHint", undefined, {
+                  amount: formatTokenAmount(minimumTrade, 18, 18),
                   multiplier: task.triggerFeeMultiplier?.toString() ?? "",
                 })}
               </p>

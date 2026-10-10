@@ -57,6 +57,11 @@ const PRICE_FLOOR_BPS = 7_000n;
 const BPS_DENOMINATOR = 10_000n;
 const ONE_BNB = 10n ** 18n;
 const TRIGGER_TRADE_FEE_MULTIPLIER = 20n;
+// Keep wallet-submitted limits below the testnet node's per-transaction cap.
+// The same limit is used for simulation, so insufficient gas fails before signing.
+const CREATE_OPERATION_GAS = 4_800_000n;
+const FUND_AND_START_GAS = 3_000_000n;
+const FUND_GAS = 1_000_000n;
 const GOLD_PRIMARY_BUTTON =
   "boost-cta text-[#211907] [--ui20-chamfer-bg:#E8C874] [--ui20-chamfer-border:#F4D994] shadow-[0_12px_28px_-16px_rgba(232,200,116,0.8)] hover:[--ui20-chamfer-bg:#F7DFA0] hover:[--ui20-chamfer-border:#FFE7AD]";
 const GOLD_SECONDARY_BUTTON =
@@ -314,6 +319,41 @@ function percentageBpsOrNull(value: string): number | null {
 function minimumBalanceForPercentage(fee: bigint | null, minimumTrade: bigint | null, bps: number | null) {
   if (fee === null || minimumTrade === null || bps === null) return null;
   return fee + (minimumTrade * 10_000n + BigInt(bps) - 1n) / BigInt(bps);
+}
+
+function contractRevertReason(error: unknown): string | null {
+  let current = error;
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth += 1) {
+    const record = current as { reason?: unknown; shortMessage?: unknown; cause?: unknown };
+    if (typeof record.reason === "string" && record.reason.trim()) return record.reason.trim();
+    if (typeof record.shortMessage === "string") {
+      const match = record.shortMessage.match(/reverted with the following reason:\s*([^\n]+)/i);
+      if (match?.[1]) return match[1].trim();
+    }
+    current = record.cause;
+  }
+  return null;
+}
+
+function isOversizedGasError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth += 1) {
+    const record = current as { message?: unknown; details?: unknown; cause?: unknown };
+    if (
+      [record.message, record.details].some(
+        (value) => typeof value === "string" && /gas limit is too large/i.test(value),
+      )
+    )
+      return true;
+    current = record.cause;
+  }
+  return false;
+}
+
+class OnchainRevertError extends Error {
+  constructor(readonly hash: Address) {
+    super("execution reverted");
+  }
 }
 
 function formatPercentage(bps: number) {
@@ -1023,24 +1063,38 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         return true;
       } catch (nextError) {
         const kind = getTxErrorKind(nextError);
-        const summary = handleTxError(nextError, {
-          userRejected: t("errors.walletRejected", t("errors.tx")),
-          walletDisconnected: t("errors.walletDisconnected", t("errors.tx")),
-          wrongNetwork: t("errors.wrongNetwork", t("errors.tx")),
-          insufficientFunds: t("errors.insufficientWalletBalance", t("errors.tx")),
-          simulationFailed: t("errors.simulation"),
-          reverted: t("errors.reverted", t("errors.tx")),
-          unknown: t("errors.tx"),
-        });
+        const revertedHash = nextError instanceof OnchainRevertError ? nextError.hash : undefined;
+        const oversizedGas = isOversizedGasError(nextError);
+        const summary = oversizedGas
+          ? t("errors.gasLimitTooLarge")
+          : handleTxError(nextError, {
+              userRejected: t("errors.walletRejected", t("errors.tx")),
+              walletDisconnected: t("errors.walletDisconnected", t("errors.tx")),
+              wrongNetwork: t("errors.wrongNetwork", t("errors.tx")),
+              insufficientFunds: t("errors.insufficientWalletBalance", t("errors.tx")),
+              simulationFailed: t("errors.simulation"),
+              reverted: t(revertedHash ? "errors.reverted" : "errors.contractRejected", t("errors.tx")),
+              unknown: t("errors.tx"),
+            });
         const rawDetail = nextError instanceof Error ? nextError.message.split("\n")[0].trim() : "";
-        const revertedHash = kind === "reverted" && nextError instanceof Error
-          ? nextError.message.match(/0x[a-fA-F0-9]{64}/)?.[0]
-          : undefined;
-        const message = revertedHash
-          ? `${summary} ${revertedHash}`
-          : (kind === "unknown" || kind === "simulationFailed") && rawDetail
-            ? `${summary} · ${rawDetail.slice(0, 160)}`
-            : summary;
+        const revertReason =
+          (kind === "reverted" || kind === "simulationFailed") && !revertedHash
+            ? contractRevertReason(nextError)
+            : null;
+        const localizedReason =
+          revertReason === "Only owner"
+            ? t("errors.onlyOwner")
+            : revertReason === "Unavailable"
+              ? t("errors.taskUnavailable")
+              : revertReason === "No budget"
+                ? t("errors.startFunds")
+                : revertReason;
+        let message = summary;
+        if (oversizedGas) message = summary;
+        else if (revertedHash) message = `${summary} ${revertedHash}`;
+        else if (localizedReason) message = `${summary} · ${localizedReason.slice(0, 120)}`;
+        else if ((kind === "unknown" || kind === "simulationFailed") && rawDetail)
+          message = `${summary} · ${rawDetail.slice(0, 160)}`;
         setError(message);
         sdk.notify.error(message);
         setTxState("failed");
@@ -1074,6 +1128,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                 abi: factoryAbi,
                 functionName: "createFixedBNBOperation",
                 args: [options, config.bnbPerRound],
+                gas: CREATE_OPERATION_GAS,
               })
             : config.mode === "fixed-token"
               ? await sdk.simulateContract({
@@ -1082,6 +1137,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   abi: factoryAbi,
                   functionName: "createFixedTokenAmountOperation",
                   args: [options, config.tokenAmountPerRound],
+                  gas: CREATE_OPERATION_GAS,
                 })
               : await sdk.simulateContract({
                   contract: "boostFactory",
@@ -1089,11 +1145,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                   abi: factoryAbi,
                   functionName: "createBalancePercentageOperation",
                   args: [options, config.balanceBps, config.maxBNBPerRound],
+                  gas: CREATE_OPERATION_GAS,
                 });
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
         setSelectedTokenAddress(config.options.targetToken);
         setSelectedTaskAddress(null);
         setDetailTab("funds");
@@ -1120,11 +1177,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
             functionName: startWithFunding ? "fundAndTryStart" : "fund",
             args: startWithFunding ? [BigInt(selectedTask.operationId)] : [],
             value: amount,
+            gas: startWithFunding ? FUND_AND_START_GAS : FUND_GAS,
           });
           setTxState("writing");
           const hash = await sdk.writeContract(simulation.request);
           setTxState("confirming");
-          if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+          if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
           setFundingAmount("");
         },
         t(startWithFunding ? "messages.taskFundedAndMaybeStarted" : "messages.taskFunded"),
@@ -1153,7 +1211,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           setTxState("writing");
           const hash = await sdk.writeContract(simulation.request);
           setTxState("confirming");
-          if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+          if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
           setWithdrawAmount("");
         },
         t("messages.withdrawn"),
@@ -1186,7 +1244,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
       },
       message,
     );
@@ -1214,7 +1272,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
       },
       t(starting ? "messages.started" : "messages.checked"),
     );
@@ -1236,7 +1294,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
       },
       t("messages.rulesUpdated"),
     );
@@ -1257,7 +1315,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
       },
       t("messages.outputRetried"),
     );
@@ -1278,7 +1336,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setTxState("writing");
         const hash = await sdk.writeContract(simulation.request);
         setTxState("confirming");
-        if ((await sdk.waitForTx(hash)).status !== "success") throw new Error(`execution reverted: ${hash}`);
+        if ((await sdk.waitForTx(hash)).status !== "success") throw new OnchainRevertError(hash);
       },
       t("messages.triggerRecovered"),
     );

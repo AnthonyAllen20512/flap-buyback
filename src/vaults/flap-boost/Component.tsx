@@ -331,9 +331,8 @@ function parsePercentageToBps(value: string, t: (key: string) => string) {
 function parseOutputSplit(selected: SplitSelections, values: SplitInputs, t: (key: string) => string): SplitShares {
   const shares = values.map((value, index) => {
     if (!selected[index]) return 0;
-    if (!/^\d+(?:\.\d{1,2})?$/.test(value.trim())) throw new Error(t("errors.outputSplit"));
-    const [whole, fraction = ""] = value.trim().split(".");
-    const bps = Number(whole) * 100 + Number((fraction + "00").slice(0, 2));
+    if (!/^\d+$/.test(value.trim())) throw new Error(t("errors.outputSplit"));
+    const bps = Number(value.trim()) * 100;
     if (!Number.isInteger(bps) || bps < 1 || bps > 10_000) throw new Error(t("errors.outputSplit"));
     return bps;
   }) as SplitShares;
@@ -351,7 +350,7 @@ function validOutputSplit(selected: SplitSelections, values: SplitInputs, t: (ke
 }
 
 function formatSplitShare(bps: number) {
-  return String(bps / 100);
+  return String(Math.round(bps / 100));
 }
 
 function splitSummary(t: (key: string) => string, shares: SplitShares) {
@@ -2538,8 +2537,20 @@ function TaskForm({
   ];
   return (
     <div>
+      {splitOutputEnabled ? (
+        <section className="boost-form-step py-5">
+          <SectionHeading index="01" icon={<Flame className="h-4 w-4" />} title={t("labels.outputType")} />
+          <SplitOutputSelector
+            t={t}
+            selected={splitSelected}
+            onSelected={setSplitSelected}
+            values={splitValues}
+            onValues={setSplitValues}
+          />
+        </section>
+      ) : null}
       <section className="boost-form-step py-5">
-        <SectionHeading index="01" icon={<Target className="h-4 w-4" />} title={t("labels.targetToken")} />
+        <SectionHeading index={splitOutputEnabled ? "02" : "01"} icon={<Target className="h-4 w-4" />} title={t("labels.targetToken")} />
         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           {lockedToken ? (
             <div className="min-w-0 rounded-lg bg-[#071015] px-4 py-3 text-xs text-[#C2C2BB]">
@@ -2592,7 +2603,7 @@ function TaskForm({
       ) : null}
       <fieldset disabled={!tokenReady} className={"m-0 min-w-0 border-0 p-0 " + (!tokenReady ? "opacity-45" : "")}>
       <section className="boost-form-step py-5">
-        <SectionHeading index="02" icon={<Gauge className="h-4 w-4" />} title={t("labels.ruleSettings")} />
+        <SectionHeading index={splitOutputEnabled ? "03" : "02"} icon={<Gauge className="h-4 w-4" />} title={t("labels.ruleSettings")} />
         <div className="mt-3 grid grid-cols-3 gap-2">
           {buybackModes.map((mode) => {
             const Icon = mode.icon;
@@ -2724,49 +2735,41 @@ function TaskForm({
         ) : null}
       </section>
 
-      <section className="boost-form-step py-5">
-        <SectionHeading index="03" icon={<Flame className="h-4 w-4" />} title={t("labels.output")} />
-        {splitOutputEnabled ? (
-          <>
-            <SplitOutputSelector
-              t={t}
-              selected={splitSelected}
-              onSelected={setSplitSelected}
-              values={splitValues}
-              onValues={setSplitValues}
-            />
+      {splitOutputEnabled && (splitSelected[1] || splitSelected[2]) ? (
+        <section className="boost-form-step py-5">
+          <SectionHeading index="04" icon={<Target className="h-4 w-4" />} title={t("labels.outputDetails")} />
+          <div className={"mt-3 grid gap-4 " + (splitSelected[1] && splitSelected[2] ? "sm:grid-cols-2" : "")}>
             {splitSelected[1] ? (
-              <div className="mt-4">
-                <Field label={t("labels.fixedRecipients")} hint={t("help.recipients")}>
-                  <textarea
-                    value={recipientsText}
-                    onChange={(event) => setRecipientsText(event.target.value)}
-                    placeholder={t("placeholders.fixedRecipients")}
-                    rows={3}
-                    aria-invalid={splitFixedInvalid}
-                    className={"w-full resize-y rounded-lg border bg-[#071015] px-3 py-2.5 font-mono text-xs text-[#F6F2E8] outline-none " +
-                      (splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")}
-                  />
-                </Field>
-              </div>
+              <Field label={t("labels.fixedRecipients")} hint={t("help.recipientsShort")}>
+                <textarea
+                  value={recipientsText}
+                  onChange={(event) => setRecipientsText(event.target.value)}
+                  placeholder={t("placeholders.fixedRecipients")}
+                  rows={1}
+                  aria-invalid={Boolean(recipientsText.trim()) && splitFixedInvalid}
+                  className={"w-full min-h-11 resize-y rounded-lg border bg-[#071015] px-3 py-2.5 font-mono text-xs text-[#F6F2E8] outline-none " +
+                    (recipientsText.trim() && splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")}
+                />
+              </Field>
             ) : null}
             {splitSelected[2] ? (
-              <div className="mt-4">
-                <Field label={t("labels.randomHolderCount")} hint={t("help.randomHolders")}>
-                  <Input
-                    value={randomRecipientCount}
-                    onChange={(event) => setRandomRecipientCount(event.target.value)}
-                    inputMode="numeric"
-                    placeholder={t("placeholders.randomHolders")}
-                    aria-invalid={splitRandomInvalid}
-                    className={splitRandomInvalid ? "!border-[#D46A64] !text-[#FFBDB6]" : undefined}
-                  />
-                </Field>
-              </div>
+              <Field label={t("labels.randomHolderCount")} hint={t("help.randomHoldersShort")}>
+                <Input
+                  value={randomRecipientCount}
+                  onChange={(event) => setRandomRecipientCount(event.target.value)}
+                  inputMode="numeric"
+                  placeholder={t("placeholders.randomHolders")}
+                  aria-invalid={splitRandomInvalid}
+                  className={splitRandomInvalid ? "!border-[#D46A64] !text-[#FFBDB6]" : undefined}
+                />
+              </Field>
             ) : null}
-          </>
-        ) : (
-        <>
+          </div>
+        </section>
+      ) : null}
+
+      {!splitOutputEnabled ? <section className="boost-form-step py-5">
+        <SectionHeading index="03" icon={<Flame className="h-4 w-4" />} title={t("labels.output")} />
         <div className="mt-4 grid grid-cols-3 gap-2">
           {outputOptions.map((option) => (
             <Button
@@ -2852,9 +2855,7 @@ function TaskForm({
             )}
           </div>
         ) : null}
-        </>
-        )}
-      </section>
+      </section> : null}
       </fieldset>
     </div>
   );
@@ -2874,8 +2875,18 @@ function SplitOutputSelector({
   onValues: (value: SplitInputs) => void;
 }) {
   const labels = [t("outputs.burn"), t("outputs.fixedDistribution"), t("outputs.randomDistribution")];
+  const colors = ["#E8C874", "#65C5C4", "#E99878"];
   const activeCount = selected.filter(Boolean).length;
   const total = selected.reduce((sum, isSelected, index) => sum + (isSelected ? Number(values[index]) || 0 : 0), 0);
+  let ringEnd = 0;
+  const ringStops = selected.flatMap((isSelected, index) => {
+    if (!isSelected) return [];
+    const start = ringEnd;
+    ringEnd = Math.min(100, ringEnd + Math.max(0, Number(values[index]) || 0));
+    return ringEnd > start ? [`${colors[index]} ${start}% ${ringEnd}%`] : [];
+  });
+  if (ringEnd < 100) ringStops.push(`#263138 ${ringEnd}% 100%`);
+  const ringBackground = `conic-gradient(${ringStops.join(", ")})`;
   let valid = false;
   try {
     parseOutputSplit(selected, values, t);
@@ -2886,63 +2897,106 @@ function SplitOutputSelector({
     if (selected[index] && activeCount === 1) return;
     const next = selected.map((value, item) => item === index ? !value : value) as SplitSelections;
     const count = next.filter(Boolean).length;
-    let remaining = 10_000;
-    let remainingCount = count;
+    const base = Math.floor(100 / count);
+    let remainder = 100 % count;
     const nextValues = next.map((value) => {
       if (!value) return "0";
-      const share = Math.floor(remaining / remainingCount);
-      remaining -= share;
-      remainingCount -= 1;
-      return formatSplitShare(share);
+      const share = base + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
+      return String(share);
     }) as SplitInputs;
     onSelected(next);
     onValues(nextValues);
   }
 
+  function updateShare(index: number, raw: string) {
+    if (!/^\d*$/.test(raw)) return;
+    const next = [...values] as SplitInputs;
+    const amount = Number(raw);
+    const max = 101 - activeCount;
+    if (raw === "" || amount < 1 || amount > max) {
+      next[index] = raw;
+      onValues(next);
+      return;
+    }
+    next[index] = String(amount);
+    const others = selected.flatMap((isSelected, item) => isSelected && item !== index ? [item] : []);
+    if (others.length === 1) next[others[0]] = String(100 - amount);
+    if (others.length === 2) {
+      const remainder = 100 - amount;
+      const firstWeight = Math.max(1, Number(values[others[0]]) || 1);
+      const secondWeight = Math.max(1, Number(values[others[1]]) || 1);
+      const first = Math.max(1, Math.min(remainder - 1,
+        Math.round(remainder * firstWeight / (firstWeight + secondWeight))));
+      next[others[0]] = String(first);
+      next[others[1]] = String(remainder - first);
+    }
+    onValues(next);
+  }
+
   return (
-    <div className="mt-4">
-      <p className="text-xs leading-5 text-[#A4AAA8]">{t("help.outputSplit")}</p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
-        {labels.map((label, index) => (
-          <div key={label} className={"rounded-lg border px-3 py-3 transition-colors " +
-            (selected[index] ? "border-[#B99757] bg-[#27241C]" : "border-[#3D454A] bg-[#0D1319]")}>
-            <button
-              type="button"
-              aria-pressed={selected[index]}
-              onClick={() => toggle(index)}
-              className="flex w-full items-center gap-2 text-left text-sm font-semibold text-[#F5E7C7]"
-            >
-              <span className={"flex h-4 w-4 items-center justify-center rounded border " +
-                (selected[index] ? "border-[#E8C874] bg-[#E8C874] text-[#211907]" : "border-[#687175]")}>
-                {selected[index] ? <CircleCheck className="h-3 w-3" /> : null}
-              </span>
-              {label}
-            </button>
-            {selected[index] ? (
-              <label className="mt-3 flex items-center gap-2">
-                <Input
-                  aria-label={`${label} ${t("labels.splitPercent")}`}
-                  aria-invalid={!valid}
-                  inputMode="decimal"
-                  value={values[index]}
-                  onChange={(event) => {
-                    const next = [...values] as SplitInputs;
-                    next[index] = event.target.value;
-                    onValues(next);
-                  }}
-                  className={"h-10 min-w-0 flex-1 rounded-lg bg-[#071015] text-right font-mono text-sm " +
-                    (!valid ? "!border-[#D46A64] !text-[#FFBDB6]" : "border-[#50534F]")}
-                />
-                <span className="text-sm text-[#C5B88F]">%</span>
-              </label>
-            ) : null}
+    <div className="mt-4 grid gap-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start">
+      <div className="flex flex-col items-center lg:items-stretch">
+        <div className="mx-auto grid size-36 place-items-center rounded-full p-4 shadow-[0_0_28px_rgba(232,200,116,0.12)]" style={{ background: ringBackground }}>
+          <div className="grid size-full place-items-center rounded-full bg-[#0B141A] font-mono text-2xl font-semibold text-[#F7E9C6]">
+            {Number.isInteger(total) ? total : "—"}%
           </div>
-        ))}
+        </div>
+        <div className="mt-4 w-full space-y-1.5">
+          {labels.map((label, index) => selected[index] ? (
+            <div key={label} className="flex items-center gap-2 text-xs text-[#BFC9C8]">
+              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: colors[index] }} />
+              <span className="min-w-0 flex-1 truncate">{label}</span>
+              <span className="font-mono text-[#F3E7CC]">{values[index]}%</span>
+            </div>
+          ) : null)}
+        </div>
       </div>
-      <p className={"mt-2 text-xs " + (valid ? "text-[#A4AAA8]" : "text-[#FFB5AF]")}>
-        {t("labels.splitTotal")} {Number.isFinite(total) ? total.toFixed(2).replace(/\.00$/, "") : "—"}%
-        {!valid ? ` · ${t("errors.outputSplit")}` : ""}
-      </p>
+      <div className="min-w-0">
+        <div className="flex items-center justify-between gap-3 border-b border-[#3D454A] pb-3">
+          <p className={"text-sm " + (valid ? "text-[#D8D2C5]" : "text-[#FFB5AF]")}>
+            {t("labels.splitTotal")} <strong className="font-mono text-[#F6E6BC]">{Number.isInteger(total) ? total : "—"}%</strong>
+            {total < 100 ? <span className="ml-3 text-[#A5AFAD]">{t("labels.splitRemaining")} {100 - total}%</span> : null}
+          </p>
+          <button type="button" onClick={() => { onSelected([true, false, false]); onValues(["100", "0", "0"]); }}
+            className="rounded-md border border-[#596062] px-3 py-1.5 text-xs text-[#E9DFCB] transition hover:border-[#E8C874] hover:text-[#E8C874]">
+            {t("buttons.resetSplit")}
+          </button>
+        </div>
+        <div className="divide-y divide-[#2E3A40]">
+          {labels.map((label, index) => (
+            <div key={label} className="py-3">
+              <div className="flex items-center gap-3">
+                <button type="button" aria-pressed={selected[index]} onClick={() => toggle(index)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium text-[#F2E9D7]">
+                  <span className="flex size-4 shrink-0 items-center justify-center rounded border"
+                    style={{ borderColor: selected[index] ? colors[index] : "#687175", backgroundColor: selected[index] ? colors[index] : "transparent", color: "#10191B" }}>
+                    {selected[index] ? <CircleCheck className="size-3" /> : null}
+                  </span>
+                  <span className="truncate">{label}</span>
+                </button>
+                <label className="flex items-center gap-1 text-sm text-[#C5B88F]">
+                  <Input aria-label={`${label} ${t("labels.splitPercent")}`} aria-invalid={selected[index] && !valid}
+                    inputMode="numeric" readOnly={!selected[index] || activeCount === 1}
+                    value={selected[index] ? values[index] : "0"}
+                    onChange={(event) => updateShare(index, event.target.value)}
+                    className={"!h-9 !w-16 rounded-md bg-[#071015] text-right font-mono text-sm " +
+                      (selected[index] && !valid ? "!border-[#D46A64] !text-[#FFBDB6]" : "border-[#50534F]")}
+                  />%
+                </label>
+              </div>
+              <input type="range" min={1} max={101 - activeCount} step={1}
+                aria-label={`${label} ${t("labels.splitPercent")}`}
+                disabled={!selected[index] || activeCount === 1}
+                value={selected[index] && Number(values[index]) >= 1 ? Math.min(Number(values[index]), 101 - activeCount) : 1}
+                onChange={(event) => updateShare(index, event.target.value)}
+                className="mt-2 block h-1.5 w-full cursor-pointer accent-[#E8C874] disabled:cursor-default disabled:opacity-35"
+                style={{ accentColor: colors[index] }} />
+            </div>
+          ))}
+        </div>
+        {!valid ? <p className="mt-2 text-xs text-[#FFB5AF]" role="alert">{t("errors.outputSplit")}</p> : null}
+      </div>
     </div>
   );
 }
@@ -3490,21 +3544,21 @@ function TaskRuleEditor({
       </div>
       {isSplit && splitSelected[1] ? (
         <div className="mt-3">
-          <CompactField label={t("labels.fixedRecipients")} hint={t("help.recipients")}>
+          <CompactField label={t("labels.fixedRecipients")} hint={t("help.recipientsShort")}>
             <textarea
               value={recipientsText}
               onChange={(event) => setRecipientsText(event.target.value)}
-              rows={3}
-              aria-invalid={splitFixedInvalid}
-              className={"w-full resize-y rounded-lg border bg-[#071015] px-3 py-2 font-mono text-xs text-[#F6F2E8] outline-none " +
-                (splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")}
+              rows={1}
+              aria-invalid={Boolean(recipientsText.trim()) && splitFixedInvalid}
+              className={"w-full min-h-11 resize-y rounded-lg border bg-[#071015] px-3 py-2 font-mono text-xs text-[#F6F2E8] outline-none " +
+                (recipientsText.trim() && splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")}
             />
           </CompactField>
         </div>
       ) : null}
       {isSplit && splitSelected[2] ? (
         <div className="mt-3">
-          <CompactField label={t("labels.randomHolderCount")} hint={t("help.randomHolders")}>
+          <CompactField label={t("labels.randomHolderCount")} hint={t("help.randomHoldersShort")}>
             <Input
               value={randomRecipientCount}
               onChange={(event) => setRandomRecipientCount(event.target.value)}

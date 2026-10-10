@@ -2933,7 +2933,18 @@ function SplitOutputSelector({
   }
 
   return (
-    <div className="mt-4 grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)] lg:items-start lg:gap-8">
+    <div className="mt-4">
+      <div className="flex min-h-12 items-center justify-between gap-4 border-b border-[#3D454A] pb-3">
+        <p className={"text-sm " + (!invalid ? "text-[#D8D2C5]" : "text-[#FFB5AF]")}>
+          {t("labels.splitTotal")} <strong className="font-mono text-[#F6E6BC]">{Number.isInteger(total) ? total : "—"}%</strong>
+          {total < 100 ? <span className="ml-3 text-[#A5AFAD]">{t("labels.splitRemaining")} {100 - total}%</span> : null}
+        </p>
+        <button type="button" onClick={() => { onSelected([true, false, false]); onValues(["100", "0", "0"]); }}
+          className="h-9 w-24 shrink-0 rounded-md border border-[#596062] px-3 text-xs text-[#E9DFCB] transition hover:border-[#E8C874] hover:text-[#E8C874]">
+          {t("buttons.resetSplit")}
+        </button>
+      </div>
+      <div className="grid gap-6 pt-4 lg:grid-cols-[210px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <div className="flex flex-col items-center lg:items-stretch">
         <div className="boost-split-ring mx-auto grid size-40 place-items-center rounded-full p-4" data-adjusting={draggingIndex !== null} style={{ background: ringBackground }}>
           <div className="grid size-full place-items-center rounded-full bg-[#0B141A] font-mono text-2xl font-semibold text-[#F7E9C6]">
@@ -2941,13 +2952,13 @@ function SplitOutputSelector({
           </div>
         </div>
         <div className="mx-auto mt-4 w-full max-w-[190px] space-y-1.5">
-          {labels.map((label, index) => selected[index] ? (
-            <div key={label} className="flex items-center gap-2 text-xs text-[#BFC9C8]">
-              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: colors[index] }} />
+          {labels.map((label, index) => (
+            <div key={label} className={"flex items-center gap-2 text-xs " + (selected[index] ? "text-[#BFC9C8]" : "text-[#718082]")}>
+              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: selected[index] ? colors[index] : "#46535A" }} />
               <span className="min-w-0 flex-1 truncate">{label}</span>
-              <span className="font-mono text-[#F3E7CC]">{values[index]}%</span>
+              <span className={"font-mono " + (selected[index] ? "text-[#F3E7CC]" : "text-[#718082]")}>{values[index]}%</span>
             </div>
-          ) : null)}
+          ))}
           {total < 100 ? (
             <div className="flex items-center gap-2 text-xs text-[#BFC9C8]">
               <span className="size-2 shrink-0 rounded-full bg-[#46535A]" />
@@ -2958,19 +2969,9 @@ function SplitOutputSelector({
         </div>
       </div>
       <div className="min-w-0">
-        <div className="grid grid-cols-[minmax(0,1fr)_96px] items-center gap-3 border-b border-[#3D454A] pb-3">
-          <p className={"text-sm " + (!invalid ? "text-[#D8D2C5]" : "text-[#FFB5AF]")}>
-            {t("labels.splitTotal")} <strong className="font-mono text-[#F6E6BC]">{Number.isInteger(total) ? total : "—"}%</strong>
-            {total < 100 ? <span className="ml-3 text-[#A5AFAD]">{t("labels.splitRemaining")} {100 - total}%</span> : null}
-          </p>
-          <button type="button" onClick={() => { onSelected([true, false, false]); onValues(["100", "0", "0"]); }}
-            className="h-9 rounded-md border border-[#596062] px-3 text-xs text-[#E9DFCB] transition hover:border-[#E8C874] hover:text-[#E8C874]">
-            {t("buttons.resetSplit")}
-          </button>
-        </div>
-        <div className="divide-y divide-[#2E3A40]">
+        <div>
           {labels.map((label, index) => (
-            <div key={label} className="py-3">
+            <div key={label} className="grid min-h-[100px] grid-rows-[36px_32px] content-center gap-2 border-b border-[#2E3A40] last:border-b-0">
               <div className="grid grid-cols-[minmax(0,1fr)_96px] items-center gap-3">
                 <div className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium text-[#F2E9D7]">
                   <span className="size-3 shrink-0 rounded-full transition-shadow duration-200"
@@ -2995,13 +2996,14 @@ function SplitOutputSelector({
                 onPointerUp={() => setDraggingIndex(null)}
                 onPointerCancel={() => setDraggingIndex(null)}
                 onBlur={() => setDraggingIndex(null)}
-                className="boost-split-slider mt-3 block w-full cursor-pointer"
+                className="boost-split-slider ml-5 block w-[calc(100%-1.25rem)] cursor-pointer"
                 style={{ "--split-color": selected[index] ? colors[index] : "#56636A", "--split-progress": `${Math.max(0, Math.min(100, Number(values[index]) || 0))}%` } as CSSProperties} />
             </div>
           ))}
         </div>
-        {invalid ? <p className="mt-2 text-xs text-[#FFB5AF]" role="alert">{t("errors.outputSplit")}</p> : null}
       </div>
+      </div>
+      {invalid ? <p className="mt-2 text-xs text-[#FFB5AF]" role="alert">{t("errors.outputSplit")}</p> : null}
     </div>
   );
 }

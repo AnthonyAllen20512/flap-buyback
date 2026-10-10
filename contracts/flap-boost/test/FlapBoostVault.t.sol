@@ -510,6 +510,69 @@ contract FlapBoostVaultTest is Test {
         assertEq(token.balanceOf(address(vault)), 0);
     }
 
+    function testNewSplitBurnsRetainsAndDistributesToFixedRecipients() public {
+        address treasury = address(0x7100);
+        address bob = address(0xB0B);
+        address carol = address(0xCA401);
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 5, treasury);
+        options.recipients = new address[](2);
+        options.recipients[0] = bob;
+        options.recipients[1] = carol;
+        uint16[3] memory shares = [uint16(2_000), uint16(3_000), uint16(5_000)];
+        vm.prank(OWNER);
+        (address address_, uint256 id) = factory.createSplitOperation(
+            options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, shares
+        );
+        FlapBoostVault vault = FlapBoostVault(payable(address_));
+        vm.prank(OWNER);
+        vault.fund{value: 0.1 ether}();
+        vm.prank(OWNER);
+        vault.startOperation(id);
+        assertEq(token.balanceOf(BURN), 2 ether);
+        assertEq(token.balanceOf(treasury), 3 ether);
+        assertEq(token.balanceOf(bob), 2.5 ether);
+        assertEq(token.balanceOf(carol), 2.5 ether);
+        assertEq(vault.getOperation(id).totalRandomHolders, 0);
+    }
+
+    function testNewSplitRetainsAndDistributesToGeneratedAddresses() public {
+        address treasury = address(0x7100);
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 5, treasury);
+        options.randomRecipientCount = 3;
+        uint16[3] memory shares = [uint16(0), uint16(5_000), uint16(5_000)];
+        vm.prank(OWNER);
+        (address address_, uint256 id) = factory.createSplitOperation(
+            options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, shares
+        );
+        FlapBoostVault vault = FlapBoostVault(payable(address_));
+        vm.prank(OWNER);
+        vault.fund{value: 0.1 ether}();
+        vm.prank(OWNER);
+        vault.startOperation(id);
+        assertEq(token.balanceOf(treasury), 5 ether);
+        assertEq(vault.getOperation(id).totalRandomHolders, 3);
+        assertEq(token.balanceOf(address(vault)), 0);
+    }
+
+    function testNewSplitRequiresRecipientForEachSelectedRoute() public {
+        FlapBoostVaultFactory.OperationOptions memory options = _options(60, 5, address(0));
+        uint16[3] memory retainOnly = [uint16(0), uint16(10_000), uint16(0)];
+        vm.prank(OWNER);
+        vm.expectRevert("Invalid retain share");
+        factory.createSplitOperation(options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, retainOnly);
+
+        options.retainRecipient = address(0x7100);
+        uint16[3] memory distributeOnly = [uint16(0), uint16(0), uint16(10_000)];
+        vm.prank(OWNER);
+        vm.expectRevert("Invalid retain share");
+        factory.createSplitOperation(options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, distributeOnly);
+
+        options.retainRecipient = address(0);
+        vm.prank(OWNER);
+        vm.expectRevert("Invalid distribution");
+        factory.createSplitOperation(options, FlapBoostVault.BuyMode.FIXED_BNB, 0.01 ether, 0, 0, distributeOnly);
+    }
+
     function testSplitMustTotalOneHundredPercent() public {
         FlapBoostVaultFactory.OperationOptions memory options = _options(60, 4, address(0));
         uint16[3] memory shares = [uint16(9_000), uint16(0), uint16(0)];

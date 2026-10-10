@@ -289,7 +289,7 @@ function outputLabel(t: (key: string) => string, mode: OutputMode) {
 }
 
 function outputRuleLabel(t: (key: string) => string, value: number, shares?: SplitShares) {
-  if (value === 4) return shares ? splitSummary(t, shares) : t("labels.outputSplit");
+  if (value >= 4) return shares ? splitSummary(t, shares, value) : t("labels.outputSplit");
   const output = outputFromValue(value);
   if (output !== "distribute") return outputLabel(t, output);
   const distribution = distributionFromValue(value) === "random"
@@ -353,8 +353,11 @@ function formatSplitShare(bps: number) {
   return String(Math.round(bps / 100));
 }
 
-function splitSummary(t: (key: string) => string, shares: SplitShares) {
-  return [t("outputs.burn"), t("outputs.fixedDistribution"), t("outputs.randomDistribution")]
+function splitSummary(t: (key: string) => string, shares: SplitShares, mode = 5) {
+  const keys = mode === 4
+    ? ["outputs.burn", "outputs.fixedDistribution", "outputs.randomDistribution"]
+    : ["outputs.splitBurn", "outputs.splitRetain", "outputs.splitDistribute"];
+  return keys.map((key) => t(key))
     .map((label, index) => shares[index] ? `${label} ${formatSplitShare(shares[index])}%` : "")
     .filter(Boolean)
     .join(" · ");
@@ -521,6 +524,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const { context, i18n } = sdk;
   const t = i18n.t;
   const [taskSnapshots, setTasks] = useState<TaskSnapshot[]>([]);
+  const [primaryVaultAddresses, setPrimaryVaultAddresses] = useState<Address[]>([]);
   const [triggerFeeSnapshot, setTriggerFeeSnapshot] = useState<{ chainId: number; fee: bigint | null } | null>(null);
   const [readState, setTaskReadState] = useState<"loading" | "disconnected" | "ready" | "error">("loading");
   const [loadedIdentity, setLoadedIdentity] = useState("");
@@ -562,16 +566,22 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const tokenRequestRef = useRef(0);
   const loadedContextTokenRef = useRef("");
 
-  const factoryAddress = useMemo(() => {
+  const factoryAddresses = useMemo(() => {
     const binding = context.manifest.match.bindings.find(
       (item) => item.chainId === context.chainId && item.factoryAddress && isValidAddress(item.factoryAddress),
     );
-    if (binding?.factoryAddress) return binding.factoryAddress;
+    if (binding?.factoryAddress) return [
+      binding.factoryAddress,
+      ...(binding.externalContracts ?? [])
+        .filter((contract) => contract.label === "Legacy Factory" && isValidAddress(contract.address))
+        .map((contract) => contract.address),
+    ];
     if (context.chainId === 56 && context.factoryAddress !== ZERO_ADDRESS && isValidAddress(context.factoryAddress)) {
-      return context.factoryAddress;
+      return [context.factoryAddress];
     }
-    return null;
+    return [];
   }, [context.chainId, context.factoryAddress, context.manifest.match.bindings]);
+  const factoryAddress = factoryAddresses[0] ?? null;
   const portalAddress = useMemo(() => {
     const binding = context.manifest.match.bindings.find((item) => item.chainId === context.chainId);
     return binding?.externalContracts?.find((contract) => contract.label === "Flap Portal")?.address ?? null;
@@ -585,7 +595,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const actionsAvailable = isActionAvailableForPhase(actionStage, marketPhase);
   const wrongNetwork = sdk.wallet.isWrongNetwork;
   const splitOutputEnabled = context.chainId === 97;
-  const readIdentity = `${context.chainId}:${factoryAddress}:${context.userAddress?.toLowerCase() ?? ""}`;
+  const readIdentity = `${context.chainId}:${factoryAddresses.join(",")}:${context.userAddress?.toLowerCase() ?? ""}`;
   const tasks = useMemo(
     () => (loadedIdentity === readIdentity ? taskSnapshots : []),
     [loadedIdentity, readIdentity, taskSnapshots],
@@ -617,11 +627,14 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   const tokenTasks = tasks.filter(
     (task) => activeTokenAddress && task.token.address.toLowerCase() === activeTokenAddress.toLowerCase(),
   );
-  const hasExistingVaultForInput = ownedTokens.some(
-    (token) => token.address.toLowerCase() === tokenAddressInput.trim().toLowerCase(),
+  const primaryVaultSet = new Set(primaryVaultAddresses.map((address) => address.toLowerCase()));
+  const hasExistingVaultForInput = tasks.some((task) =>
+    primaryVaultSet.has(task.address.toLowerCase()) &&
+    task.token.address.toLowerCase() === tokenAddressInput.trim().toLowerCase(),
   );
   const operationCountForInput = tasks.filter(
-    (task) => task.token.address.toLowerCase() === tokenAddressInput.trim().toLowerCase(),
+    (task) => primaryVaultSet.has(task.address.toLowerCase()) &&
+      task.token.address.toLowerCase() === tokenAddressInput.trim().toLowerCase(),
   ).length;
   const selectedTask = tokenTasks.find((task) => taskKey(task) === selectedTaskAddress) ?? tokenTasks[0] ?? null;
   const selectedTaskIsOwner = Boolean(
@@ -705,11 +718,20 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       let recipient = ZERO_ADDRESS;
       const splitBps = splitOutputEnabled ? parseOutputSplit(splitSelected, splitValues, t) : undefined;
       if (splitBps) {
-        outputModeValue = 4;
+        outputModeValue = 5;
         if (splitBps[1] > 0) {
-          if (!validFixedRecipientsInput(recipientsText)) throw new Error(t("errors.fixedRecipients"));
+          if (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS)
+            throw new Error(t("errors.retainWallet"));
+          recipient = retainRecipient.trim() as Address;
+        }
+        if (splitBps[2] > 0) {
+          if (distributionMode === "fixed") {
+            if (!validFixedRecipientsInput(recipientsText)) throw new Error(t("errors.fixedRecipients"));
+          } else {
+            recipients.length = 0;
+            randomCount = parseRandomHolderCount(randomRecipientCount, t);
+          }
         } else recipients.length = 0;
-        if (splitBps[2] > 0) randomCount = parseRandomHolderCount(randomRecipientCount, t);
       } else if (outputMode === "retain") {
         if (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS)
           throw new Error(t("errors.retainWallet"));
@@ -874,6 +896,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
     if (loadedIdentityRef.current !== readIdentity) setTaskReadState(context.userAddress ? "loading" : "disconnected");
     if (!factoryAddress || !context.userAddress) {
       setTasks([]);
+      setPrimaryVaultAddresses([]);
       setSelectedTaskAddress(null);
       setTaskReadState(context.userAddress ? "error" : "disconnected");
       setLoadedIdentity(readIdentity);
@@ -881,7 +904,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       return;
     }
     try {
-      const [triggerFee, allVaultAddresses] = await Promise.all([
+      const [triggerFee, factoryVaultAddresses] = await Promise.all([
         triggerAddress
           ? sdk.readContract<bigint>({
               contract: "boostTrigger",
@@ -890,15 +913,15 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               functionName: "getFee",
             }).catch(() => null)
           : Promise.resolve(null),
-        sdk.readContract<Address[]>({
-          contract: "boostFactory",
-          address: factoryAddress,
-          abi: factoryAbi,
-          functionName: "vaultsOf",
-          args: [context.userAddress],
-        }),
+        Promise.all(factoryAddresses.map((address) => sdk.readContract<Address[]>({
+          contract: "boostFactory", address, abi: factoryAbi, functionName: "vaultsOf", args: [context.userAddress!],
+        }))),
       ]);
+      const allVaultAddresses = [...new Map(factoryVaultAddresses.flat().map(
+        (address): [string, Address] => [address.toLowerCase(), address],
+      )).values()];
       if (requestId === requestRef.current) setTriggerFeeSnapshot({ chainId: context.chainId, fee: triggerFee });
+      if (requestId === requestRef.current) setPrimaryVaultAddresses(factoryVaultAddresses[0] ?? []);
       const vaultRows = await mapInBatches([...allVaultAddresses].reverse(), VAULT_READ_BATCH_SIZE, async (address) => {
         const [
           owner,
@@ -1016,7 +1039,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               args: [BigInt(id)],
             })
           : null;
-        const outputSplit: SplitShares = operation.outputMode === 4
+        const outputSplit: SplitShares = operation.outputMode >= 4
           ? [...await sdk.readContract<SplitShares>({
               contract: "boostVault",
               address: vault.address,
@@ -1025,7 +1048,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
               args: [BigInt(id)],
             })] as SplitShares
           : [0, 0, 0];
-        const pendingOutputSplit: SplitShares | null = pendingRuleUpdate?.outputMode === 4
+        const pendingOutputSplit: SplitShares | null = pendingRuleUpdate && pendingRuleUpdate.outputMode >= 4
           ? [...await sdk.readContract<SplitShares>({
               contract: "boostVault",
               address: vault.address,
@@ -1102,13 +1125,14 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
         setLoadedIdentity(readIdentity);
         if (loadedIdentityRef.current !== readIdentity) {
           setTasks([]);
+          setPrimaryVaultAddresses([]);
           setSelectedTaskAddress(null);
         }
       }
     } finally {
       if (requestId === requestRef.current) setRefreshing(false);
     }
-  }, [context.chainId, context.userAddress, factoryAddress, readIdentity, sdk, t, triggerAddress]);
+  }, [context.chainId, context.userAddress, factoryAddress, factoryAddresses, readIdentity, sdk, t, triggerAddress]);
 
   useEffect(() => {
     if (activeView === "plaza") return;
@@ -1543,7 +1567,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           </nav>
           {activeView === "plaza" ? (
             <BuybackPlaza
-              factoryAddress={factoryAddress}
+              factoryAddresses={factoryAddresses}
               onCreate={beginNewToken}
             />
           ) : (
@@ -1628,7 +1652,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     variant="outline"
                     className={GOLD_SECONDARY_BUTTON + " h-10 flex-1 rounded-lg px-4 text-xs sm:flex-none"}
                     onClick={() => beginCreateTask("burn")}
-                    disabled={activeAction !== null || tokenTasks.length >= 24}
+                    disabled={activeAction !== null || tokenTasks.filter((task) => primaryVaultSet.has(task.address.toLowerCase())).length >= 24}
                   >
                     <Plus className="h-3.5 w-3.5" />
                     {t("buttons.addOperation")}
@@ -1890,7 +1914,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
   );
 }
 
-function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | null; onCreate: () => void }) {
+function BuybackPlaza({ factoryAddresses, onCreate }: { factoryAddresses: Address[]; onCreate: () => void }) {
   const sdk = useFlapSdk();
   const t = sdk.i18n.t;
   const [vaults, setVaults] = useState<PlazaVaultSnapshot[]>([]);
@@ -1902,6 +1926,7 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const nextOffsetRef = useRef<number | null>(null);
+  const factoryCountsRef = useRef<Array<{ address: Address; count: number }> | null>(null);
   const requestRef = useRef(0);
 
   const projects = useMemo(() => [...vaults].sort((a, b) =>
@@ -1930,26 +1955,32 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
       setHasOlder(false);
       setPage(1);
       nextOffsetRef.current = null;
+      factoryCountsRef.current = null;
     } else {
       setLoadingOlder(true);
     }
-    if (!factoryAddress) {
+    if (factoryAddresses.length === 0) {
       setTotalVaultCount(null);
       setReadState("ready");
       setLoadingOlder(false);
       return;
     }
     try {
-      const count = await sdk.readContract<bigint>({
-        contract: "boostFactory",
-        address: factoryAddress,
-        abi: factoryAbi,
-        functionName: "vaultCount",
-      });
-      if (count > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Vault count exceeds safe pagination.");
+      const factoryCounts = factoryCountsRef.current ?? await Promise.all([...factoryAddresses].reverse().map(
+        async (address) => {
+          const count = await sdk.readContract<bigint>({
+            contract: "boostFactory", address, abi: factoryAbi, functionName: "vaultCount",
+          });
+          if (count > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Vault count exceeds safe pagination.");
+          return { address, count: Number(count) };
+        },
+      ));
+      const totalCount = factoryCounts.reduce((sum, factory) => sum + factory.count, 0);
+      if (!Number.isSafeInteger(totalCount)) throw new Error("Vault count exceeds safe pagination.");
       if (requestId !== requestRef.current) return;
-      setTotalVaultCount(Number(count));
-      const cursor = reset ? Number(count) : nextOffsetRef.current;
+      factoryCountsRef.current = factoryCounts;
+      setTotalVaultCount(totalCount);
+      const cursor = reset ? totalCount : nextOffsetRef.current;
       if (cursor === null || cursor <= 0) {
         nextOffsetRef.current = null;
         setHasOlder(false);
@@ -1957,16 +1988,24 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
         return;
       }
       const offset = Math.max(0, cursor - PLAZA_VAULTS_PER_LOAD);
-      const addresses = await sdk.readContract<Address[]>({
-        contract: "boostFactory",
-        address: factoryAddress,
-        abi: factoryAbi,
-        functionName: "vaultsRange",
-        args: [BigInt(offset), BigInt(cursor - offset)],
+      let base = 0;
+      const ranges = factoryCounts.flatMap((factory) => {
+        const start = Math.max(offset, base);
+        const end = Math.min(cursor, base + factory.count);
+        const range = end > start ? [{ address: factory.address, start: start - base, length: end - start, globalStart: start }] : [];
+        base += factory.count;
+        return range;
       });
+      const indexed = (await Promise.all(ranges.map(async (range) => {
+        const addresses = await sdk.readContract<Address[]>({
+          contract: "boostFactory", address: range.address, abi: factoryAbi,
+          functionName: "vaultsRange", args: [BigInt(range.start), BigInt(range.length)],
+        });
+        if (addresses.length !== range.length) throw new Error("Incomplete Factory page.");
+        return addresses.map((address, index) => ({ address, creationIndex: range.globalStart + index }));
+      }))).flat().reverse();
       if (requestId !== requestRef.current) return;
-      if (addresses.length !== cursor - offset) throw new Error("Incomplete Factory page.");
-      const indexed = addresses.map((address, index) => ({ address, creationIndex: offset + index })).reverse();
+      if (indexed.length !== cursor - offset) throw new Error("Incomplete Factory page.");
       const loaded = await mapInBatches(indexed, VAULT_READ_BATCH_SIZE, async ({ address, creationIndex }): Promise<PlazaVaultSnapshot | null> => {
         try {
           const [owner, token, operationCount, availableBNB, reservedBNB] = await Promise.all([
@@ -2011,7 +2050,7 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
         }
       });
       if (requestId !== requestRef.current) return;
-      if (addresses.length > 0 && loaded.every((vault) => vault === null)) throw new Error("Vault reads failed.");
+      if (indexed.length > 0 && loaded.every((vault) => vault === null)) throw new Error("Vault reads failed.");
       setVaults((current) => {
         const byAddress = new Map<string, PlazaVaultSnapshot>(current.map(
           (vault): [string, PlazaVaultSnapshot] => [vault.address.toLowerCase(), vault],
@@ -2027,7 +2066,7 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
     } finally {
       if (requestId === requestRef.current) setLoadingOlder(false);
     }
-  }, [factoryAddress, sdk]);
+  }, [factoryAddresses, sdk]);
 
   useEffect(() => {
     void loadProjects(true);
@@ -2063,7 +2102,7 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
         <span className="ml-auto text-xs text-[#A3AAA6]">{t("plaza.projectCount", undefined, { count: visibleProjects.length })}</span>
       </div>
       </> : null}
-      {!factoryAddress ? <Alert tone="warning">{t("plaza.factoryUnavailable")}</Alert> : null}
+      {factoryAddresses.length === 0 ? <Alert tone="warning">{t("plaza.factoryUnavailable")}</Alert> : null}
       {readState === "loading" ? <p className="relative z-10 mt-5 flex items-center gap-2 text-sm text-[#C8C0A9]"><RefreshCw className="h-4 w-4 animate-spin motion-reduce:animate-none" />{t("plaza.loading")}</p> : null}
       {readState === "error" ? <Alert tone="warning">{t("plaza.readFailed")}</Alert> : null}
       {pagedProjects.length ? (
@@ -2086,7 +2125,7 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
             </article>
           ))}
         </div>
-      ) : readState === "ready" && factoryAddress && totalVaultCount === 0 ? (
+      ) : readState === "ready" && factoryAddresses.length > 0 && totalVaultCount === 0 ? (
         <div className="boost-plaza-empty relative z-10 mt-4 flex flex-col items-center gap-4 rounded-xl border px-5 py-5 text-center sm:flex-row sm:text-left">
           <span className="boost-plaza-empty-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"><Coins className="h-6 w-6" strokeWidth={1.5} /></span>
           <div className="min-w-0 flex-1">
@@ -2095,7 +2134,7 @@ function BuybackPlaza({ factoryAddress, onCreate }: { factoryAddress: Address | 
           </div>
           <Button type="button" size="sm" className={GOLD_PRIMARY_BUTTON + " h-10 shrink-0 px-4 text-xs"} onClick={onCreate}><Plus className="h-3.5 w-3.5" />{t("plaza.create")}</Button>
         </div>
-      ) : readState === "ready" && factoryAddress && totalVaultCount !== null && totalVaultCount > 0 ? (
+      ) : readState === "ready" && factoryAddresses.length > 0 && totalVaultCount !== null && totalVaultCount > 0 ? (
         <div className="relative z-10 mt-4 rounded-lg border border-[#3B4747] bg-[#0D151A] px-4 py-5 text-center">
           <p className="text-sm font-semibold text-[#F4E9CF]">{t(searchTerm ? "plaza.noMatch" : "plaza.noRunning")}</p>
           <p className="mt-1 text-xs text-[#9FAAA7]">{t(searchTerm ? "plaza.noMatchHint" : "plaza.emptyHint")}</p>
@@ -2520,8 +2559,12 @@ function TaskForm({
   const balanceBps = percentageBpsOrNull(balancePercentage);
   const balancePercentageInvalid = buyMode === "balance-percentage" && balanceBps === null;
   const requiredBalance = minimumBalanceForPercentage(totalFee, minimumTrade, balanceBps);
-  const splitFixedInvalid = splitOutputEnabled && splitSelected[1] && !validFixedRecipientsInput(recipientsText);
-  const splitRandomInvalid = splitOutputEnabled && splitSelected[2] && !validRandomRecipientCount(randomRecipientCount);
+  const splitRetainInvalid = splitOutputEnabled && splitSelected[1] &&
+    (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS);
+  const splitFixedInvalid = splitOutputEnabled && splitSelected[2] && distributionMode === "fixed" &&
+    !validFixedRecipientsInput(recipientsText);
+  const splitRandomInvalid = splitOutputEnabled && splitSelected[2] && distributionMode === "random" &&
+    !validRandomRecipientCount(randomRecipientCount);
   const outputOptions: Array<{ value: OutputMode; label: string }> = [
     { value: "burn", label: t("outputs.burn") },
     { value: "retain", label: t("outputs.retain") },
@@ -2750,31 +2793,45 @@ function TaskForm({
       {splitOutputEnabled && (splitSelected[1] || splitSelected[2]) ? (
         <section className="boost-form-step py-5">
           <SectionHeading index="04" icon={<Target className="h-4 w-4" />} title={t("labels.outputDetails")} />
-          <div className={"mt-3 grid gap-4 " + (splitSelected[1] && splitSelected[2] ? "sm:grid-cols-2" : "")}>
+          <div className="mt-3 space-y-4">
             {splitSelected[1] ? (
-              <Field label={t("labels.fixedRecipients")} hint={t("help.recipientsShort")}>
-                <textarea
-                  value={recipientsText}
-                  onChange={(event) => setRecipientsText(event.target.value)}
-                  placeholder={t("placeholders.fixedRecipients")}
-                  rows={1}
-                  aria-invalid={Boolean(recipientsText.trim()) && splitFixedInvalid}
-                  className={"w-full min-h-11 resize-y rounded-lg border bg-[#071015] px-3 py-2.5 font-mono text-xs text-[#F6F2E8] outline-none " +
-                    (recipientsText.trim() && splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")}
+              <Field label={t("labels.retainWallet")} hint={t("help.retain")}>
+                <Input
+                  value={retainRecipient}
+                  onChange={(event) => setRetainRecipient(event.target.value)}
+                  placeholder={t("placeholders.wallet")}
+                  aria-invalid={splitRetainInvalid}
+                  className={"font-mono text-xs " + (splitRetainInvalid ? "!border-[#D46A64]" : "")}
                 />
               </Field>
             ) : null}
             {splitSelected[2] ? (
-              <Field label={t("labels.randomHolderCount")} hint={t("help.randomHoldersShort")}>
-                <Input
-                  value={randomRecipientCount}
-                  onChange={(event) => setRandomRecipientCount(event.target.value)}
-                  inputMode="numeric"
-                  placeholder={t("placeholders.randomHolders")}
-                  aria-invalid={splitRandomInvalid}
-                  className={splitRandomInvalid ? "!border-[#D46A64] !text-[#FFBDB6]" : undefined}
-                />
-              </Field>
+              <div>
+                <p className="mb-2 text-sm font-medium text-[#F1EAD9]">{t("labels.distributionMode")}</p>
+                <div className="mb-3 grid grid-cols-2 gap-2">
+                  {(["fixed", "random"] as DistributionMode[]).map((mode) => (
+                    <Button key={mode} type="button" size="sm" variant={distributionMode === mode ? "default" : "outline"}
+                      className={(distributionMode === mode ? GOLD_PRIMARY_BUTTON : GOLD_OUTLINE_BUTTON) + " h-10 justify-center rounded-lg text-xs"}
+                      onClick={() => setDistributionMode(mode)}>
+                      {mode === "fixed" ? t("outputs.fixedDistribution") : t("outputs.randomDistribution")}
+                    </Button>
+                  ))}
+                </div>
+                {distributionMode === "fixed" ? (
+                  <Field label={t("labels.fixedRecipients")} hint={t("help.recipientsShort")}>
+                    <textarea value={recipientsText} onChange={(event) => setRecipientsText(event.target.value)}
+                      placeholder={t("placeholders.fixedRecipients")} rows={2} aria-invalid={splitFixedInvalid}
+                      className={"w-full min-h-11 resize-y rounded-lg border bg-[#071015] px-3 py-2.5 font-mono text-xs text-[#F6F2E8] outline-none " +
+                        (splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")} />
+                  </Field>
+                ) : (
+                  <Field label={t("labels.randomHolderCount")} hint={t("help.randomHoldersShort")}>
+                    <Input value={randomRecipientCount} onChange={(event) => setRandomRecipientCount(event.target.value)}
+                      inputMode="numeric" placeholder={t("placeholders.randomHolders")}
+                      aria-invalid={splitRandomInvalid} className={splitRandomInvalid ? "!border-[#D46A64] !text-[#FFBDB6]" : undefined} />
+                  </Field>
+                )}
+              </div>
             ) : null}
           </div>
         </section>
@@ -2875,19 +2932,23 @@ function TaskForm({
 
 function SplitOutputSelector({
   t,
+  legacy = false,
   selected,
   onSelected,
   values,
   onValues,
 }: {
   t: (key: string) => string;
+  legacy?: boolean;
   selected: SplitSelections;
   onSelected: (value: SplitSelections) => void;
   values: SplitInputs;
   onValues: (value: SplitInputs) => void;
 }) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-  const labels = [t("outputs.burn"), t("outputs.fixedDistribution"), t("outputs.randomDistribution")];
+  const labels = legacy
+    ? [t("outputs.burn"), t("outputs.fixedDistribution"), t("outputs.randomDistribution")]
+    : [t("outputs.splitBurn"), t("outputs.splitRetain"), t("outputs.splitDistribute")];
   const colors = ["#E8C874", "#65C5C4", "#E99878"];
   const total = selected.reduce((sum, isSelected, index) => sum + (isSelected ? Number(values[index]) || 0 : 0), 0);
   let ringEnd = 0;
@@ -3077,8 +3138,9 @@ function TaskList({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-lg font-semibold">
                   <span className="text-[#F4FAF9]">{task.token.symbol}</span>
-                  <span className="text-[#F0CB9D]">· {task.outputMode === 4 ? t("labels.outputSplit") : outputRuleLabel(t, task.outputMode)}</span>
+                  <span className="text-[#F0CB9D]">· {task.outputMode >= 4 ? t("labels.outputSplit") : outputRuleLabel(t, task.outputMode)}</span>
                   <span className="font-mono text-xs font-medium text-[#959993]">#{task.operationId + 1}</span>
+                  <span className="font-mono text-[11px] font-normal text-[#819594]">Vault {shortAddress(task.address)}</span>
                 </div>
                 <p className="mt-2 text-base text-[#CDD0C8]">
                   <span className="text-[#829E9F]">{t("labels.roundRule")} </span>
@@ -3160,13 +3222,20 @@ function TaskOverview({
 }) {
   const [editing, setEditing] = useState(false);
   const output = outputFromValue(task.outputMode);
-  const isSplit = task.outputMode === 4;
+  const isSplit = task.outputMode >= 4;
   const outputDetail =
-    isSplit
+    task.outputMode === 4
       ? [
           task.outputSplit[1] ? t("labels.recipientCount", undefined, { count: task.recipients.length }) : "",
           task.outputSplit[2] ? t("labels.randomHoldersPerRound", undefined, { count: task.randomRecipientCount }) : "",
         ].filter(Boolean).join(" · ")
+      : task.outputMode === 5
+        ? [
+            task.outputSplit[1] ? shortAddress(task.retainRecipient) : "",
+            task.outputSplit[2] ? task.randomRecipientCount > 0
+              ? t("labels.randomHoldersPerRound", undefined, { count: task.randomRecipientCount })
+              : t("labels.recipientCount", undefined, { count: task.recipients.length }) : "",
+          ].filter(Boolean).join(" · ")
       : output === "retain"
       ? shortAddress(task.retainRecipient)
       : output === "distribute"
@@ -3305,11 +3374,14 @@ function TaskRuleEditor({
   );
   const [intervalMinutes, setIntervalMinutes] = useState((rules.interval / 60n).toString());
   const [output, setOutput] = useState<OutputMode>(outputFromValue(rules.outputMode));
-  const isSplit = rules.outputMode === 4;
+  const isSplit = rules.outputMode >= 4;
+  const isLegacySplit = rules.outputMode === 4;
   const initialSplit = task.pendingOutputSplit ?? task.outputSplit;
   const [splitSelected, setSplitSelected] = useState<SplitSelections>(initialSplit.map((share) => share > 0) as SplitSelections);
   const [splitValues, setSplitValues] = useState<SplitInputs>(initialSplit.map(formatSplitShare) as SplitInputs);
-  const [distributionMode, setDistributionMode] = useState<DistributionMode>(distributionFromValue(rules.outputMode));
+  const [distributionMode, setDistributionMode] = useState<DistributionMode>(
+    rules.outputMode === 5 && rules.randomRecipientCount > 0 ? "random" : distributionFromValue(rules.outputMode),
+  );
   const [retainRecipient, setRetainRecipient] = useState(
     rules.retainRecipient === ZERO_ADDRESS ? "" : rules.retainRecipient,
   );
@@ -3330,8 +3402,12 @@ function TaskRuleEditor({
   const requiredBalance = minimumBalanceForPercentage(
     task.triggerFee === null ? null : task.triggerFee + task.bookingFee, minimumTrade, balanceBps,
   );
-  const splitFixedInvalid = isSplit && splitSelected[1] && !validFixedRecipientsInput(recipientsText);
-  const splitRandomInvalid = isSplit && splitSelected[2] && !validRandomRecipientCount(randomRecipientCount);
+  const splitRetainInvalid = isSplit && !isLegacySplit && splitSelected[1] &&
+    (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS);
+  const splitFixedInvalid = isSplit && (isLegacySplit ? splitSelected[1] : splitSelected[2] && distributionMode === "fixed") &&
+    !validFixedRecipientsInput(recipientsText);
+  const splitRandomInvalid = isSplit && splitSelected[2] && (isLegacySplit || distributionMode === "random") &&
+    !validRandomRecipientCount(randomRecipientCount);
 
   function submitRules() {
     try {
@@ -3372,11 +3448,27 @@ function TaskRuleEditor({
       let recipient = ZERO_ADDRESS;
       const splitBps = isSplit ? parseOutputSplit(splitSelected, splitValues, t) : undefined;
       if (splitBps) {
-        outputMode = 4;
-        if (splitBps[1] > 0) {
-          if (!validFixedRecipientsInput(recipientsText)) throw new Error(t("errors.fixedRecipients"));
-        } else recipients.length = 0;
-        if (splitBps[2] > 0) randomCount = parseRandomHolderCount(randomRecipientCount, t);
+        outputMode = isLegacySplit ? 4 : 5;
+        if (isLegacySplit) {
+          if (splitBps[1] > 0) {
+            if (!validFixedRecipientsInput(recipientsText)) throw new Error(t("errors.fixedRecipients"));
+          } else recipients.length = 0;
+          if (splitBps[2] > 0) randomCount = parseRandomHolderCount(randomRecipientCount, t);
+        } else {
+          if (splitBps[1] > 0) {
+            if (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS)
+              throw new Error(t("errors.retainWallet"));
+            recipient = retainRecipient.trim() as Address;
+          }
+          if (splitBps[2] > 0) {
+            if (distributionMode === "fixed") {
+              if (!validFixedRecipientsInput(recipientsText)) throw new Error(t("errors.fixedRecipients"));
+            } else {
+              recipients.length = 0;
+              randomCount = parseRandomHolderCount(randomRecipientCount, t);
+            }
+          } else recipients.length = 0;
+        }
       } else if (output === "retain") {
         if (!isValidAddress(retainRecipient.trim()) || retainRecipient.trim() === ZERO_ADDRESS)
           throw new Error(t("errors.retainWallet"));
@@ -3525,6 +3617,7 @@ function TaskRuleEditor({
         <p className="mt-1 text-xs leading-5 text-[#D5C585]">{t("help.editOutputRisk")}</p>
         {isSplit ? <SplitOutputSelector
           t={t}
+          legacy={isLegacySplit}
           selected={splitSelected}
           onSelected={setSplitSelected}
           values={splitValues}
@@ -3549,7 +3642,44 @@ function TaskRuleEditor({
         </div>
         )}
       </div>
-      {isSplit && splitSelected[1] ? (
+      {isSplit && !isLegacySplit && splitSelected[1] ? (
+        <div className="mt-3">
+          <CompactField label={t("labels.retainWallet")} hint={t("help.retain")}>
+            <Input value={retainRecipient} onChange={(event) => setRetainRecipient(event.target.value)}
+              aria-invalid={splitRetainInvalid}
+              className={"font-mono text-xs " + (splitRetainInvalid ? "!border-[#D46A64]" : "")} />
+          </CompactField>
+        </div>
+      ) : null}
+      {isSplit && !isLegacySplit && splitSelected[2] ? (
+        <div className="mt-3">
+          <p className="mb-2 text-sm font-medium text-[#F1EAD9]">{t("labels.distributionMode")}</p>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            {(["fixed", "random"] as DistributionMode[]).map((mode) => (
+              <Button key={mode} type="button" size="sm" variant={distributionMode === mode ? "default" : "outline"}
+                className={(distributionMode === mode ? GOLD_PRIMARY_BUTTON : GOLD_OUTLINE_BUTTON) + " h-10 justify-center rounded-lg text-xs"}
+                onClick={() => setDistributionMode(mode)}>
+                {mode === "fixed" ? t("outputs.fixedDistribution") : t("outputs.randomDistribution")}
+              </Button>
+            ))}
+          </div>
+          {distributionMode === "fixed" ? (
+            <CompactField label={t("labels.fixedRecipients")} hint={t("help.recipientsShort")}>
+              <textarea value={recipientsText} onChange={(event) => setRecipientsText(event.target.value)}
+                rows={2} aria-invalid={splitFixedInvalid}
+                className={"w-full min-h-11 resize-y rounded-lg border bg-[#071015] px-3 py-2 font-mono text-xs text-[#F6F2E8] outline-none " +
+                  (splitFixedInvalid ? "border-[#D46A64] focus:border-[#F18B82]" : "border-[#50534F] focus:border-[#DABF79]")} />
+            </CompactField>
+          ) : (
+            <CompactField label={t("labels.randomHolderCount")} hint={t("help.randomHoldersShort")}>
+              <Input value={randomRecipientCount} onChange={(event) => setRandomRecipientCount(event.target.value)}
+                inputMode="numeric" aria-invalid={splitRandomInvalid}
+                className={splitRandomInvalid ? "!border-[#D46A64] !text-[#FFBDB6]" : undefined} />
+            </CompactField>
+          )}
+        </div>
+      ) : null}
+      {isLegacySplit && splitSelected[1] ? (
         <div className="mt-3">
           <CompactField label={t("labels.fixedRecipients")} hint={t("help.recipientsShort")}>
             <textarea
@@ -3563,7 +3693,7 @@ function TaskRuleEditor({
           </CompactField>
         </div>
       ) : null}
-      {isSplit && splitSelected[2] ? (
+      {isLegacySplit && splitSelected[2] ? (
         <div className="mt-3">
           <CompactField label={t("labels.randomHolderCount")} hint={t("help.randomHoldersShort")}>
             <Input
@@ -3653,7 +3783,7 @@ function TaskRuleEditor({
           state={buttonState}
           onClick={submitRules}
           disabled={!canWrite || fixedBnbInvalid || maxBnbInvalid || balancePercentageInvalid ||
-            (isSplit && (!validOutputSplit(splitSelected, splitValues, t) || splitFixedInvalid || splitRandomInvalid))}
+            (isSplit && (!validOutputSplit(splitSelected, splitValues, t) || splitRetainInvalid || splitFixedInvalid || splitRandomInvalid))}
         />
       </div>
     </div>

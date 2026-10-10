@@ -93,7 +93,7 @@ contract FlapBoostVaultFactory {
         uint256 maxBNBPerRound,
         uint16[3] calldata splitBps
     ) external returns (address vault, uint256 operationId) {
-        require(options.outputMode == 4, "Not split output");
+        require(options.outputMode == 4 || options.outputMode == 5, "Not split output");
         return _create(
             options,
             mode,

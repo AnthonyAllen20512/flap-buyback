@@ -145,7 +145,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         return _pendingRules[id];
     }
 
-    /// @notice Burn, retain and distribute shares in basis points. Zero for legacy outputs.
+    /// @notice Mode 4: burn, fixed and generated. Mode 5: burn, retain and distribute.
     function outputSplit(uint256 id) external view returns (uint16[3] memory) {
         return _outputSplits[id];
     }
@@ -170,7 +170,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         external returns (uint256 id)
     {
         require(msg.sender == factory, "Only factory");
-        require(config.outputMode == 4, "Not split output");
+        require(config.outputMode == 4 || config.outputMode == 5, "Not split output");
         return _addOperation(config, splitBps);
     }
 
@@ -215,14 +215,14 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
 
     function updateOperation(uint256 id, RuleUpdate calldata update) external onlyOwner {
         uint16[3] memory splitBps;
-        if (update.outputMode == 4) splitBps = _outputSplits[id];
+        if (update.outputMode >= 4) splitBps = _outputSplits[id];
         _updateOperation(id, update, splitBps);
     }
 
     function updateSplitOperation(uint256 id, RuleUpdate calldata update, uint16[3] calldata splitBps)
         external onlyOwner
     {
-        require(update.outputMode == 4, "Not split output");
+        require(update.outputMode == 4 || update.outputMode == 5, "Not split output");
         _updateOperation(id, update, splitBps);
     }
 
@@ -413,7 +413,7 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
             }
         } else if (op.outputMode == 3) {
             _distributeToRandomHolders(id, op, amount);
-        } else {
+        } else if (op.outputMode == 4) {
             uint16[3] memory shares = _outputSplits[id];
             uint256 burnAmount = Math.mulDiv(amount, shares[0], BPS);
             uint256 fixedAmount = Math.mulDiv(amount, shares[1], BPS);
@@ -433,6 +433,30 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
                 }
             }
             if (randomAmount != 0) _distributeToRandomHolders(id, op, randomAmount);
+        } else {
+            uint16[3] memory shares = _outputSplits[id];
+            uint256 burnAmount = Math.mulDiv(amount, shares[0], BPS);
+            uint256 retainAmount = Math.mulDiv(amount, shares[1], BPS);
+            uint256 distributionAmount = amount - burnAmount - retainAmount;
+            if (shares[2] == 0) {
+                if (shares[1] != 0) retainAmount += distributionAmount;
+                else burnAmount += distributionAmount;
+                distributionAmount = 0;
+            }
+            if (burnAmount != 0) IERC20(targetToken).safeTransfer(BURN_ADDRESS, burnAmount);
+            if (retainAmount != 0) IERC20(targetToken).safeTransfer(op.retainRecipient, retainAmount);
+            if (distributionAmount != 0) {
+                if (op.randomRecipientCount != 0) {
+                    _distributeToRandomHolders(id, op, distributionAmount);
+                } else {
+                    uint256 base = distributionAmount / op.recipients.length;
+                    uint256 remainder = distributionAmount % op.recipients.length;
+                    for (uint256 i; i < op.recipients.length; ++i) {
+                        uint256 share = base + (i < remainder ? 1 : 0);
+                        if (share != 0) IERC20(targetToken).safeTransfer(op.recipients[i], share);
+                    }
+                }
+            }
         }
         op.totalTokensOutput += amount;
     }
@@ -717,18 +741,32 @@ contract FlapBoostVault is ReentrancyGuard, IFlapBoostTriggerReceiver {
         } else {
             require(fixedBNB == 0 && fixedTokens == 0 && balanceBps_ != 0 && balanceBps_ <= BPS, "Invalid BPS mode");
         }
-        require(output <= 4, "Invalid output");
+        require(output <= 5, "Invalid output");
         if (output < 4) {
             require(splitBps[0] == 0 && splitBps[1] == 0 && splitBps[2] == 0, "Unexpected split");
         } else {
             require(uint256(splitBps[0]) + splitBps[1] + splitBps[2] == BPS, "Invalid split");
             require(splitBps[0] != 0 || splitBps[1] != 0 || splitBps[2] != 0, "Empty split");
             require(splitBps[0] <= BPS && splitBps[1] <= BPS && splitBps[2] <= BPS, "Invalid share");
-            require(retain == address(0), "Invalid retain share");
-            if (splitBps[1] == 0) require(recipients.length == 0, "Unexpected fixed addresses");
-            else require(recipients.length > 0 && recipients.length <= 5, "Invalid fixed addresses");
-            if (splitBps[2] == 0) require(randomRecipientCount == 0, "Unexpected random addresses");
-            else require(randomRecipientCount != 0 && randomRecipientCount <= MAX_RANDOM_RECIPIENTS, "Invalid random addresses");
+            if (output == 4) {
+                require(retain == address(0), "Invalid retain share");
+                if (splitBps[1] == 0) require(recipients.length == 0, "Unexpected fixed addresses");
+                else require(recipients.length > 0 && recipients.length <= 5, "Invalid fixed addresses");
+                if (splitBps[2] == 0) require(randomRecipientCount == 0, "Unexpected random addresses");
+                else require(randomRecipientCount != 0 && randomRecipientCount <= MAX_RANDOM_RECIPIENTS, "Invalid random addresses");
+            } else {
+                require(splitBps[1] == 0 ? retain == address(0) : retain != address(0), "Invalid retain share");
+                if (splitBps[2] == 0) {
+                    require(recipients.length == 0 && randomRecipientCount == 0, "Unexpected distribution");
+                } else {
+                    require(
+                        (recipients.length > 0 && recipients.length <= 5 && randomRecipientCount == 0)
+                            || (recipients.length == 0 && randomRecipientCount > 0
+                                && randomRecipientCount <= MAX_RANDOM_RECIPIENTS),
+                        "Invalid distribution"
+                    );
+                }
+            }
         }
         if (output == 0) {
             require(retain == address(0) && recipients.length == 0 && randomRecipientCount == 0, "Invalid burn");

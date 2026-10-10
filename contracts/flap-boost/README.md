@@ -2,13 +2,13 @@
 
 Standalone, user-funded BNB buybacks. This is **not** a tax-token Vault or
 VaultPortal integration. `FlapBoostVaultFactory` creates exactly one
-`FlapBoostVault` for each owner and target token. All operations use the same
-BNB balance. On the new testnet Factory, one round can split bought tokens
-between burn, fixed recipients, and generated addresses in any combination.
+`FlapBoostVault` for each owner and target token within that Factory. All
+operations in a Vault use the same BNB balance. On the new testnet Factory,
+one round can split bought tokens between burn, retention and distribution.
 
 ## Creation and funding
 
-The Factory exposes three real operation modes:
+The Factory exposes three buy amount modes and a split-output creation entry:
 
 - `createFixedBNBOperation(options, bnbPerRound)` spends a fixed BNB amount.
 - `createFixedTokenAmountOperation(options, tokenAmountPerRound)` derives the
@@ -16,16 +16,18 @@ The Factory exposes three real operation modes:
 - `createBalancePercentageOperation(options, balanceBps, maxBNBPerRound)` spends a
   percentage of the post-fee shared balance, optionally capped.
 - `createSplitOperation(options, mode, amount, balanceBps, maxBNBPerRound, splitBps)`
-  buys once and distributes the received tokens according to three shares:
-  burn, fixed addresses, generated addresses. Shares are basis points and must
-  total 10,000. Fixed output is
-  divided among one to five unique addresses; generated output uses one to
-  twenty new synthetic addresses per round.
+  buys once and distributes the received tokens according to three shares.
+  In output mode 5 the shares are burn, retain to one specified wallet, and
+  distribute to either one to five fixed recipients or one to twenty generated
+  addresses. Output mode 4 retains the prior burn/fixed/generated interpretation.
+  Shares are basis points and must total 10,000.
 
 The generated addresses are not actual token holders and have no usable private
 keys. Tokens sent to them are effectively unrecoverable. Rounding dust goes to
 the generated-address share when selected, otherwise the fixed-address share,
-otherwise burn. Split rules can be edited with `updateSplitOperation`; a change
+otherwise burn in mode 4. In mode 5, dust goes to distribution when selected,
+otherwise retention, otherwise burn. Split rules can be edited with
+`updateSplitOperation`; a change
 to an already-booked round takes effect after that round completes.
 
 All modes require `minTokensPerBNB`, a per-operation absolute price floor. This
@@ -88,10 +90,12 @@ funding order, refund timing, reservation safety, closure, and swap retry.
 
 Use `script/testnet/bnb/DeployFlapBoostTestnet.s.sol` to deploy the Factory
 on BSC testnet.
-Current testnet Factory (chain 97): `0xF12C19d415b432268e201ea38fd93011F7a306F1`
-([deployment transaction](https://testnet.bscscan.com/tx/0xc54653eccc59de6c8a31bd407be7626be21ab0d7f15fce4df68ff2a066567555)).
-This deployment includes proportional output, the per-booking fee, and the
-combined-fee guard. Previous testnet Vaults remain under their original Factory.
+Current testnet Factory (chain 97): `0x8501188344c454acb2198518e2ed81e0f8f6381e`
+([deployment transaction](https://testnet.bscscan.com/tx/0xba100a12cfcc29d046e69cccd236bd30783d88306c404c5b3049cb5ac85bed35)).
+This deployment adds output mode 5: proportional burn, retention to one owner-specified
+wallet, and distribution to either 1–5 fixed recipients or generated addresses.
+Mode 4 remains unchanged for Vaults created by the previous Factory
+`0xF12C19d415b432268e201ea38fd93011F7a306F1`; the mini-app reads both Factory lists.
 Set `FLAP_BOOST_DEPLOYER_PRIVATE_KEY` only in a trusted local environment; do
 not put it in scripts, source files, or chat logs. Update the mini-app manifest
 binding to the verified Factory address after deployment.

@@ -9,7 +9,7 @@
 - 支持网络：BNB Chain 主网 56 和测试网 97；其他 chain ID 拒绝创建 Vault。
 - 这是用户自主充值的非税收 Mini App，不是报告中的 StakingBuybackVault。没有质押、推荐、分红、Guardian、Beacon 升级或 VaultPortal 发币业务，不声明 VaultFactory v2.3 合规。
 - 第一轮可在所有者充值交易中直接尝试执行；后续通过官方 Trigger 服务串行预约。每个所有者、每个代币只有一份 Vault 与 BNB 共享资金。
-- 测试网新增单轮按比例处理：一次回购买到的代币可按合计 10000 bps 分配到销毁、1–5 个固定地址、1–20 个新生成地址。创建和编辑均校验比例、地址与数量；已预约轮次完成后才应用编辑结果。主网现有单选操作入口保留。
+- 测试网新增模式 5：一次回购买到的代币按合计 10000 bps 分配到销毁、指定留存钱包、分发。分发目的地二选一：1–5 个固定地址或 1–20 个新生成地址。创建和编辑均校验比例、地址与数量；已预约轮次完成后才应用编辑结果。原模式 4（销毁、固定地址、生成地址）保持不变，主网现有单选操作入口保留。
 - Factory 构造时创建独立 `FlapBoostVaultDeployer`，将 Vault 创建字节码从 Factory 运行时分离。部署器只接受 Factory 调用；Vault 中记录的授权 Factory 仍为 Factory 本身。
 
 ## 构建与测试
@@ -63,7 +63,7 @@ forge test --match-path 'test/FlapBoostVault.mainnet.t.sol' -vv
 - 定量买入直接按代币数量询价，UI 不再要求额外填写 BNB 上限。
 - 所有者可在充值交易中尝试首轮回购，无需充值后再次确认启动；小额充值保留在金库，后续补足再试。
 - 自动轮次按合计费用实施 10 倍门槛；每次成功预约收取 0.0001 BNB，失败预约不收。Mini App 读取官方请求状态，仅对证明 `FAILED` 的请求显示所有者恢复入口。`PENDING` 不显示恢复按钮。
-- 比例输出在一轮中只进行一次回购，随后按销毁、固定地址、生成地址的 bps 分配到账代币；比例必须合计 10000。未选中的目的地不会收到代币，余数优先归生成地址，再归固定地址，最后归销毁。
+- 比例输出在一轮中只进行一次回购，比例必须合计 10000 bps。模式 5 按销毁、留存、分发比例处理；留存转入指定钱包，分发转入固定地址或新生成地址。整数除法余数优先进入分发；未选择分发时进入留存；仅选销毁时进入销毁。原模式 4 的销毁、固定地址、生成地址规则保持不变。
 
 ## 需要重点审查的既有设计
 
@@ -75,7 +75,7 @@ forge test --match-path 'test/FlapBoostVault.mainnet.t.sol' -vv
 
 ## 部署与交付
 
-UI manifest 当前绑定测试网 Factory `0xF12C19d415b432268e201ea38fd93011F7a306F1`（[部署交易](https://testnet.bscscan.com/tx/0xc54653eccc59de6c8a31bd407be7626be21ab0d7f15fce4df68ff2a066567555)）。该 Factory 的部署器为 `0x0d92a5d8D40b204347fBfB9236426039964bd0CF`。本地编译后的两份运行时代码，在剔除 immutable 地址填充值后均与测试网链上字节码一致。旧测试网 Factory 的任务没有迁移；主网代码路径保留，但 manifest 尚未设置正式主网 Factory；主网上线需独立部署并绑定。
+UI manifest 当前绑定测试网 Factory `0x8501188344c454acb2198518e2ed81e0f8f6381e`（[部署交易](https://testnet.bscscan.com/tx/0xba100a12cfcc29d046e69cccd236bd30783d88306c404c5b3049cb5ac85bed35)），其部署器为 `0x9243Eb546F8A8E58d8E91235817342ED9e8C1431`。UI 仍读取旧 Factory `0xF12C19d415b432268e201ea38fd93011F7a306F1` 的任务；旧 Vault 不迁移，资金池彼此独立。主网代码路径保留，但 manifest 尚未设置正式主网 Factory；主网上线需独立部署并绑定。
 
 UI 四文件 zip 是审核源码交付，不是带 Workbench 格式标记的生产上传包。合约包不包含 `.env`、私钥、钱包文件、`broadcast/`、`out/`、`cache/` 或 `.git/`；SHA256 清单标识实际交付内容。
 

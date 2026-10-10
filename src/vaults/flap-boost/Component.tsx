@@ -303,6 +303,19 @@ function parsePercentageToBps(value: string, t: (key: string) => string) {
   return bps;
 }
 
+function percentageBpsOrNull(value: string): number | null {
+  try {
+    return parsePercentageToBps(value, (key) => key);
+  } catch {
+    return null;
+  }
+}
+
+function minimumBalanceForPercentage(fee: bigint | null, minimumTrade: bigint | null, bps: number | null) {
+  if (fee === null || minimumTrade === null || bps === null) return null;
+  return fee + (minimumTrade * 10_000n + BigInt(bps) - 1n) / BigInt(bps);
+}
+
 function formatPercentage(bps: number) {
   return (bps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }) + "%";
 }
@@ -1537,6 +1550,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
                     buyMode={buyMode}
                     setBuyMode={setBuyMode}
                     minimumTrade={creationMinimumTrade}
+                    triggerFee={currentTriggerFee}
                     feeMultiplier={creationFeeMultiplier}
                     bnbPerRound={bnbPerRound}
                     setBnbPerRound={setBnbPerRound}
@@ -2253,6 +2267,7 @@ function TaskForm({
   buyMode,
   setBuyMode,
   minimumTrade,
+  triggerFee,
   feeMultiplier,
   bnbPerRound,
   setBnbPerRound,
@@ -2286,6 +2301,7 @@ function TaskForm({
   buyMode: BuyMode;
   setBuyMode: (value: BuyMode) => void;
   minimumTrade: bigint | null;
+  triggerFee: bigint | null;
   feeMultiplier: bigint;
   bnbPerRound: string;
   setBnbPerRound: (value: string) => void;
@@ -2315,6 +2331,9 @@ function TaskForm({
   const maxBnbValue = optionalBnbAmount(maxBnbPerRound);
   const maxBnbInvalid = buyMode === "balance-percentage" &&
     (maxBnbValue === null || (minimumTrade !== null && maxBnbValue > 0n && maxBnbValue < minimumTrade));
+  const balanceBps = percentageBpsOrNull(balancePercentage);
+  const balancePercentageInvalid = buyMode === "balance-percentage" && balanceBps === null;
+  const requiredBalance = minimumBalanceForPercentage(triggerFee, minimumTrade, balanceBps);
   const outputOptions: Array<{ value: OutputMode; label: string }> = [
     { value: "burn", label: t("outputs.burn") },
     { value: "retain", label: t("outputs.retain") },
@@ -2433,9 +2452,9 @@ function TaskForm({
         <p className="mt-2 text-xs leading-5 text-[#A4AAA8]">
           {buybackModes.find((mode) => mode.value === buyMode)?.detail}
         </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className={"mt-4 grid gap-3 sm:grid-cols-2 " + (buyMode === "balance-percentage" ? "lg:grid-cols-3" : "")}>
           {buyMode === "fixed-bnb" ? (
-            <Field label={t("labels.bnbPerRound")} hint={t("help.bnbPerRound")}>
+            <Field label={t("labels.bnbPerRound")}>
               <Input
                 value={bnbPerRound}
                 onChange={(event) => setBnbPerRound(event.target.value)}
@@ -2449,7 +2468,7 @@ function TaskForm({
             </Field>
           ) : null}
           {buyMode === "fixed-token" ? (
-            <Field label={t("labels.tokenAmountPerRound")} hint={t("help.tokenAmountPerRound")}>
+            <Field label={t("labels.tokenAmountPerRound")}>
               <Input
                 value={tokenAmountPerRound}
                 onChange={(event) => setTokenAmountPerRound(event.target.value)}
@@ -2460,15 +2479,19 @@ function TaskForm({
           ) : null}
           {buyMode === "balance-percentage" ? (
             <>
-              <Field label={t("labels.balancePercentage")} hint={t("help.balancePercentage")}>
+              <Field label={t("labels.balancePercentage")}>
                 <Input
                   value={balancePercentage}
                   onChange={(event) => setBalancePercentage(event.target.value)}
                   inputMode="decimal"
                   placeholder={t("placeholders.percentage")}
+                  aria-invalid={balancePercentageInvalid}
+                  className={balancePercentageInvalid
+                    ? "!border-[#D46A64] !text-[#FFBDB6] focus:!border-[#F18B82] focus:!ring-[#D46A64]/25"
+                    : undefined}
                 />
               </Field>
-              <Field label={t("labels.maxBnbPerRound")} hint={t("help.maxBnbForPercentage")}>
+              <Field label={t("labels.maxBnbPerRound")}>
                 <Input
                   value={maxBnbPerRound}
                   onChange={(event) => setMaxBnbPerRound(event.target.value)}
@@ -2482,7 +2505,7 @@ function TaskForm({
               </Field>
             </>
           ) : null}
-          <Field label={t("labels.interval")} hint={t("help.interval")}>
+          <Field label={t("labels.intervalMinutes")}>
             <Input
               value={intervalMinutes}
               onChange={(event) => setIntervalMinutes(event.target.value)}
@@ -2491,6 +2514,16 @@ function TaskForm({
             />
           </Field>
         </div>
+        {buyMode === "balance-percentage" && requiredBalance !== null ? (
+          <p className="mt-3 text-xs leading-5 text-[#A4AAA8]">
+            {t("help.percentageSchedulingBalance", undefined, {
+              amount: formatTokenAmount(requiredBalance, 18, 18),
+            })}
+          </p>
+        ) : null}
+        {balancePercentageInvalid ? (
+          <p className="mt-3 text-xs leading-5 text-[#FFB5AF]">{t("errors.percentage")}</p>
+        ) : null}
         {minimumTrade !== null && fixedBnbInvalid && fixedBnbValue !== null ? (
           <p className="mt-3 rounded-lg border border-[#874A4A] bg-[#2A1518] px-3 py-2 text-xs leading-5 text-[#FFB5AF]">
             {t("help.triggerFeeMinimumWarning", undefined, {
@@ -2600,11 +2633,11 @@ function TaskForm({
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="boost-field block min-w-0">
       <span className="block text-sm font-medium text-[#F1EAD9]">{label}</span>
-      <span className="mt-1 block text-xs leading-5 text-[#A4AAA8]">{hint}</span>
+      {hint ? <span className="mt-1 block text-xs leading-5 text-[#A4AAA8]">{hint}</span> : null}
       <span className="mt-2 block [&_input]:h-11 [&_input]:rounded-lg [&_input]:border-[#50534F] [&_input]:bg-[#071015] [&_input]:px-3.5 [&_input]:font-mono [&_input]:text-sm [&_input]:text-[#F6F2E8] [&_input]:placeholder:text-[#668183] [&_input]:focus:border-[#DABF79]">
         {children}
       </span>
@@ -2886,7 +2919,9 @@ function TaskRuleEditor({
     formatTokenAmount(rules.fixedTokenAmountPerRound, task.token.decimals, 18),
   );
   const [balanceShare, setBalanceShare] = useState((rules.balanceBps / 100).toString());
-  const [maxBnb, setMaxBnb] = useState(formatTokenAmount(rules.maxBNBPerRound, 18, 18));
+  const [maxBnb, setMaxBnb] = useState(
+    rules.maxBNBPerRound === 0n ? "" : formatTokenAmount(rules.maxBNBPerRound, 18, 18),
+  );
   const [intervalMinutes, setIntervalMinutes] = useState((rules.interval / 60n).toString());
   const [output, setOutput] = useState<OutputMode>(outputFromValue(rules.outputMode));
   const [distributionMode, setDistributionMode] = useState<DistributionMode>(distributionFromValue(rules.outputMode));
@@ -2905,6 +2940,9 @@ function TaskRuleEditor({
   const enteredMaxBnb = optionalBnbAmount(maxBnb);
   const maxBnbInvalid = mode === "balance-percentage" &&
     (enteredMaxBnb === null || (minimumTrade !== null && enteredMaxBnb > 0n && enteredMaxBnb < minimumTrade));
+  const balanceBps = percentageBpsOrNull(balanceShare);
+  const balancePercentageInvalid = mode === "balance-percentage" && balanceBps === null;
+  const requiredBalance = minimumBalanceForPercentage(task.triggerFee, minimumTrade, balanceBps);
 
   function submitRules() {
     try {
@@ -2990,9 +3028,9 @@ function TaskRuleEditor({
         <span className="text-xs font-semibold tracking-[0.08em] text-[#84D9D3]">{buyModeLabel(t, task.buyMode)}</span>
         <span className="text-xs text-[#9AB3B3]">{t("help.editModeFixed")}</span>
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className={"mt-3 grid gap-3 sm:grid-cols-2 " + (mode === "balance-percentage" ? "lg:grid-cols-3" : "")}>
         {mode === "fixed-bnb" ? (
-          <CompactField label={t("labels.bnbPerRound")} hint={t("help.bnbPerRound")}>
+          <CompactField label={t("labels.bnbPerRound")}>
             <Input
               value={fixedBnb}
               onChange={(event) => setFixedBnb(event.target.value)}
@@ -3005,20 +3043,24 @@ function TaskRuleEditor({
           </CompactField>
         ) : null}
         {mode === "fixed-token" ? (
-          <CompactField label={t("labels.tokenAmountPerRound")} hint={t("help.tokenAmountPerRound")}>
+          <CompactField label={t("labels.tokenAmountPerRound")}>
             <Input value={fixedTokens} onChange={(event) => setFixedTokens(event.target.value)} inputMode="decimal" />
           </CompactField>
         ) : null}
         {mode === "balance-percentage" ? (
           <>
-            <CompactField label={t("labels.balancePercentage")} hint={t("help.balancePercentage")}>
+            <CompactField label={t("labels.balancePercentage")}>
               <Input
                 value={balanceShare}
                 onChange={(event) => setBalanceShare(event.target.value)}
                 inputMode="decimal"
+                aria-invalid={balancePercentageInvalid}
+                className={balancePercentageInvalid
+                  ? "!border-[#D46A64] !text-[#FFBDB6] focus:!border-[#F18B82] focus:!ring-[#D46A64]/25"
+                  : undefined}
               />
             </CompactField>
-            <CompactField label={t("labels.maxBnbPerRound")} hint={t("help.maxBnbForPercentage")}>
+            <CompactField label={t("labels.maxBnbPerRound")}>
               <Input
                 value={maxBnb}
                 onChange={(event) => setMaxBnb(event.target.value)}
@@ -3032,7 +3074,7 @@ function TaskRuleEditor({
             </CompactField>
           </>
         ) : null}
-        <CompactField label={t("labels.interval")} hint={t("help.interval")}>
+        <CompactField label={t("labels.intervalMinutes")}>
           <Input
             value={intervalMinutes}
             onChange={(event) => setIntervalMinutes(event.target.value)}
@@ -3040,6 +3082,16 @@ function TaskRuleEditor({
           />
         </CompactField>
       </div>
+      {mode === "balance-percentage" && requiredBalance !== null ? (
+        <p className="mt-3 text-xs leading-5 text-[#A4AAA8]">
+          {t("help.percentageSchedulingBalance", undefined, {
+            amount: formatTokenAmount(requiredBalance, 18, 18),
+          })}
+        </p>
+      ) : null}
+      {balancePercentageInvalid ? (
+        <p className="mt-3 text-xs leading-5 text-[#FFB5AF]">{t("errors.percentage")}</p>
+      ) : null}
       {mode === "fixed-bnb" && enteredFixedBnb === null ? (
         <p className="mt-3 rounded-lg border border-[#874A4A] bg-[#2A1518] px-3 py-2 text-xs leading-5 text-[#FFB5AF]">
           {t("errors.amount")}
@@ -3169,18 +3221,18 @@ function TaskRuleEditor({
           idleLabel={t("buttons.saveRules")}
           state={buttonState}
           onClick={submitRules}
-          disabled={!canWrite || fixedBnbInvalid || maxBnbInvalid}
+          disabled={!canWrite || fixedBnbInvalid || maxBnbInvalid || balancePercentageInvalid}
         />
       </div>
     </div>
   );
 }
 
-function CompactField({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
+function CompactField({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block min-w-0">
       <span className="block text-sm font-medium text-[#F1EAD9]">{label}</span>
-      <span className="mt-1 block text-xs leading-5 text-[#A4AAA8]">{hint}</span>
+      {hint ? <span className="mt-1 block text-xs leading-5 text-[#A4AAA8]">{hint}</span> : null}
       <span className="mt-2 block [&_input]:h-10 [&_input]:rounded-md [&_input]:border-[#50534F] [&_input]:bg-[#071015] [&_input]:px-3 [&_input]:font-mono [&_input]:text-sm [&_input]:text-[#F6F2E8] [&_input]:focus:border-[#DABF79]">
         {children}
       </span>

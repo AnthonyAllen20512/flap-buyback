@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { ActionAvailabilityStage, Address, VaultComponentProps } from "@/src/sdk";
 import {
   ZERO_ADDRESS,
@@ -2273,6 +2273,18 @@ function BoostMotionStyles() {
     .boost-form-step:last-child { border-bottom: 0; }
     .boost-form-step::before { content: ""; position: absolute; pointer-events: none; left: 0; bottom: -1px; width: 0; height: 1px; background: linear-gradient(90deg, #E8D08C, transparent); transition: width 320ms ease; }
     .boost-form-step:focus-within::before { width: 45%; }
+    .boost-split-ring { position: relative; isolation: isolate; box-shadow: 0 0 28px #E8C87418; transition: transform 220ms cubic-bezier(.2,.8,.2,1), box-shadow 220ms ease; }
+    .boost-split-ring > div { position: relative; z-index: 1; }
+    .boost-split-ring::after { content: ""; position: absolute; inset: -5px; pointer-events: none; border-radius: 50%; opacity: .35; background: conic-gradient(transparent 0 65%, #FFF3CD 74%, transparent 84%); -webkit-mask: radial-gradient(transparent 62%, #000 68% 75%, transparent 82%); mask: radial-gradient(transparent 62%, #000 68% 75%, transparent 82%); animation: boostOrbit 12s linear infinite; transition: opacity 200ms ease; }
+    .boost-split-ring[data-adjusting="true"] { transform: scale(1.035); box-shadow: 0 0 40px #E8C87444; }
+    .boost-split-ring[data-adjusting="true"]::after { opacity: .9; animation-duration: 2s; }
+    .boost-split-slider { -webkit-appearance: none; appearance: none; height: 32px; border-radius: 999px; background: linear-gradient(90deg, var(--split-color) 0 var(--split-progress), #354147 var(--split-progress) 100%) center / 100% 8px no-repeat; transition: filter 180ms ease; }
+    .boost-split-slider:hover, .boost-split-slider:active { filter: drop-shadow(0 0 8px var(--split-color)); }
+    .boost-split-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 19px; height: 19px; border: 2px solid #0D171D; border-radius: 50%; background: var(--split-color); box-shadow: 0 0 0 1px var(--split-color), 0 0 12px var(--split-color); transition: transform 180ms ease, box-shadow 180ms ease; }
+    .boost-split-slider::-moz-range-thumb { width: 15px; height: 15px; border: 2px solid #0D171D; border-radius: 50%; background: var(--split-color); box-shadow: 0 0 0 1px var(--split-color), 0 0 12px var(--split-color); transition: transform 180ms ease, box-shadow 180ms ease; }
+    .boost-split-slider:not(:disabled):active::-webkit-slider-thumb { transform: scale(1.24); box-shadow: 0 0 0 5px #E8C8742B, 0 0 22px var(--split-color); }
+    .boost-split-slider:not(:disabled):active::-moz-range-thumb { transform: scale(1.24); box-shadow: 0 0 0 5px #E8C8742B, 0 0 22px var(--split-color); }
+    .boost-split-slider:focus-visible { outline: 2px solid #FFF0BB; outline-offset: 7px; }
     .boost-step-heading { position: relative; z-index: 1; }
     .boost-step-heading > span:nth-child(2) { transform-origin: left; animation: boostStepLink 700ms cubic-bezier(.2,.8,.2,1) both; }
     .boost-step-index { animation: boostIndex 7.2s ease-in-out infinite; }
@@ -2874,9 +2886,9 @@ function SplitOutputSelector({
   values: SplitInputs;
   onValues: (value: SplitInputs) => void;
 }) {
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const labels = [t("outputs.burn"), t("outputs.fixedDistribution"), t("outputs.randomDistribution")];
   const colors = ["#E8C874", "#65C5C4", "#E99878"];
-  const activeCount = selected.filter(Boolean).length;
   const total = selected.reduce((sum, isSelected, index) => sum + (isSelected ? Number(values[index]) || 0 : 0), 0);
   let ringEnd = 0;
   const ringStops = selected.flatMap((isSelected, index) => {
@@ -2892,57 +2904,43 @@ function SplitOutputSelector({
     parseOutputSplit(selected, values, t);
     valid = true;
   } catch { /* The inline error and disabled submit explain the invalid sum. */ }
-
-  function toggle(index: number) {
-    if (selected[index] && activeCount === 1) return;
-    const next = selected.map((value, item) => item === index ? !value : value) as SplitSelections;
-    const count = next.filter(Boolean).length;
-    const base = Math.floor(100 / count);
-    let remainder = 100 % count;
-    const nextValues = next.map((value) => {
-      if (!value) return "0";
-      const share = base + (remainder > 0 ? 1 : 0);
-      if (remainder > 0) remainder -= 1;
-      return String(share);
-    }) as SplitInputs;
-    onSelected(next);
-    onValues(nextValues);
-  }
+  const incomplete = !valid && total < 100 && total > 0 && selected.every((isSelected, index) =>
+    !isSelected || /^\d+$/.test(values[index]) && Number(values[index]) >= 1 && Number(values[index]) <= 100);
+  const invalid = !valid && !incomplete;
 
   function updateShare(index: number, raw: string) {
     if (!/^\d*$/.test(raw)) return;
     const next = [...values] as SplitInputs;
-    const amount = Number(raw);
-    const max = 101 - activeCount;
-    if (raw === "" || amount < 1 || amount > max) {
+    if (raw === "" || Number(raw) > 100) {
       next[index] = raw;
+      onSelected(next.map((value) => Number(value) > 0) as SplitSelections);
       onValues(next);
       return;
     }
+    const amount = Number(raw);
+    const previous = Number(values[index]) || 0;
     next[index] = String(amount);
-    const others = selected.flatMap((isSelected, item) => isSelected && item !== index ? [item] : []);
-    if (others.length === 1) next[others[0]] = String(100 - amount);
-    if (others.length === 2) {
-      const remainder = 100 - amount;
-      const firstWeight = Math.max(1, Number(values[others[0]]) || 1);
-      const secondWeight = Math.max(1, Number(values[others[1]]) || 1);
-      const first = Math.max(1, Math.min(remainder - 1,
-        Math.round(remainder * firstWeight / (firstWeight + secondWeight))));
-      next[others[0]] = String(first);
-      next[others[1]] = String(remainder - first);
+    let excess = Math.max(0, amount - previous - Math.max(0, 100 - total));
+    for (let item = 0; item < next.length && excess > 0; item += 1) {
+      if (item === index) continue;
+      const available = Number(next[item]) || 0;
+      const deducted = Math.min(excess, available);
+      next[item] = String(available - deducted);
+      excess -= deducted;
     }
+    onSelected(next.map((value) => Number(value) > 0) as SplitSelections);
     onValues(next);
   }
 
   return (
-    <div className="mt-4 grid gap-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start">
+    <div className="mt-4 grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <div className="flex flex-col items-center lg:items-stretch">
-        <div className="mx-auto grid size-36 place-items-center rounded-full p-4 shadow-[0_0_28px_rgba(232,200,116,0.12)]" style={{ background: ringBackground }}>
+        <div className="boost-split-ring mx-auto grid size-40 place-items-center rounded-full p-4" data-adjusting={draggingIndex !== null} style={{ background: ringBackground }}>
           <div className="grid size-full place-items-center rounded-full bg-[#0B141A] font-mono text-2xl font-semibold text-[#F7E9C6]">
             {Number.isInteger(total) ? total : "—"}%
           </div>
         </div>
-        <div className="mt-4 w-full space-y-1.5">
+        <div className="mx-auto mt-4 w-full max-w-[190px] space-y-1.5">
           {labels.map((label, index) => selected[index] ? (
             <div key={label} className="flex items-center gap-2 text-xs text-[#BFC9C8]">
               <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: colors[index] }} />
@@ -2950,52 +2948,59 @@ function SplitOutputSelector({
               <span className="font-mono text-[#F3E7CC]">{values[index]}%</span>
             </div>
           ) : null)}
+          {total < 100 ? (
+            <div className="flex items-center gap-2 text-xs text-[#BFC9C8]">
+              <span className="size-2 shrink-0 rounded-full bg-[#46535A]" />
+              <span className="min-w-0 flex-1 truncate">{t("labels.splitRemaining")}</span>
+              <span className="font-mono text-[#BFC9C8]">{100 - total}%</span>
+            </div>
+          ) : null}
         </div>
       </div>
       <div className="min-w-0">
-        <div className="flex items-center justify-between gap-3 border-b border-[#3D454A] pb-3">
-          <p className={"text-sm " + (valid ? "text-[#D8D2C5]" : "text-[#FFB5AF]")}>
+        <div className="grid grid-cols-[minmax(0,1fr)_96px] items-center gap-3 border-b border-[#3D454A] pb-3">
+          <p className={"text-sm " + (!invalid ? "text-[#D8D2C5]" : "text-[#FFB5AF]")}>
             {t("labels.splitTotal")} <strong className="font-mono text-[#F6E6BC]">{Number.isInteger(total) ? total : "—"}%</strong>
             {total < 100 ? <span className="ml-3 text-[#A5AFAD]">{t("labels.splitRemaining")} {100 - total}%</span> : null}
           </p>
           <button type="button" onClick={() => { onSelected([true, false, false]); onValues(["100", "0", "0"]); }}
-            className="rounded-md border border-[#596062] px-3 py-1.5 text-xs text-[#E9DFCB] transition hover:border-[#E8C874] hover:text-[#E8C874]">
+            className="h-9 rounded-md border border-[#596062] px-3 text-xs text-[#E9DFCB] transition hover:border-[#E8C874] hover:text-[#E8C874]">
             {t("buttons.resetSplit")}
           </button>
         </div>
         <div className="divide-y divide-[#2E3A40]">
           {labels.map((label, index) => (
             <div key={label} className="py-3">
-              <div className="flex items-center gap-3">
-                <button type="button" aria-pressed={selected[index]} onClick={() => toggle(index)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium text-[#F2E9D7]">
-                  <span className="flex size-4 shrink-0 items-center justify-center rounded border"
-                    style={{ borderColor: selected[index] ? colors[index] : "#687175", backgroundColor: selected[index] ? colors[index] : "transparent", color: "#10191B" }}>
-                    {selected[index] ? <CircleCheck className="size-3" /> : null}
-                  </span>
+              <div className="grid grid-cols-[minmax(0,1fr)_96px] items-center gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium text-[#F2E9D7]">
+                  <span className="size-3 shrink-0 rounded-full transition-shadow duration-200"
+                    style={{ backgroundColor: selected[index] ? colors[index] : "#46535A", boxShadow: selected[index] ? `0 0 12px ${colors[index]}88` : "none" }} />
                   <span className="truncate">{label}</span>
-                </button>
-                <label className="flex items-center gap-1 text-sm text-[#C5B88F]">
-                  <Input aria-label={`${label} ${t("labels.splitPercent")}`} aria-invalid={selected[index] && !valid}
-                    inputMode="numeric" readOnly={!selected[index] || activeCount === 1}
-                    value={selected[index] ? values[index] : "0"}
+                </div>
+                <label className="flex items-center justify-end gap-1 text-sm text-[#C5B88F]">
+                  <Input aria-label={`${label} ${t("labels.splitPercent")}`} aria-invalid={invalid}
+                    inputMode="numeric"
+                    value={values[index]}
                     onChange={(event) => updateShare(index, event.target.value)}
-                    className={"!h-9 !w-16 rounded-md bg-[#071015] text-right font-mono text-sm " +
-                      (selected[index] && !valid ? "!border-[#D46A64] !text-[#FFBDB6]" : "border-[#50534F]")}
+                    className={"!h-9 !w-[72px] rounded-md bg-[#071015] text-right font-mono text-sm " +
+                      (invalid ? "!border-[#D46A64] !text-[#FFBDB6]" : "border-[#50534F]")}
                   />%
                 </label>
               </div>
-              <input type="range" min={1} max={101 - activeCount} step={1}
+              <input type="range" min={0} max={100} step={1}
                 aria-label={`${label} ${t("labels.splitPercent")}`}
-                disabled={!selected[index] || activeCount === 1}
-                value={selected[index] && Number(values[index]) >= 1 ? Math.min(Number(values[index]), 101 - activeCount) : 1}
+                value={Math.max(0, Math.min(100, Number(values[index]) || 0))}
                 onChange={(event) => updateShare(index, event.target.value)}
-                className="mt-2 block h-1.5 w-full cursor-pointer accent-[#E8C874] disabled:cursor-default disabled:opacity-35"
-                style={{ accentColor: colors[index] }} />
+                onPointerDown={() => setDraggingIndex(index)}
+                onPointerUp={() => setDraggingIndex(null)}
+                onPointerCancel={() => setDraggingIndex(null)}
+                onBlur={() => setDraggingIndex(null)}
+                className="boost-split-slider mt-3 block w-full cursor-pointer"
+                style={{ "--split-color": selected[index] ? colors[index] : "#56636A", "--split-progress": `${Math.max(0, Math.min(100, Number(values[index]) || 0))}%` } as CSSProperties} />
             </div>
           ))}
         </div>
-        {!valid ? <p className="mt-2 text-xs text-[#FFB5AF]" role="alert">{t("errors.outputSplit")}</p> : null}
+        {invalid ? <p className="mt-2 text-xs text-[#FFB5AF]" role="alert">{t("errors.outputSplit")}</p> : null}
       </div>
     </div>
   );

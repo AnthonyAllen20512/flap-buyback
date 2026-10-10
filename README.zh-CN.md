@@ -1,3 +1,11 @@
+# Flap Buyback 回购项目
+
+本仓库同时包含 [Flap Boost Mini App 界面](./src/vaults/flap-boost/)与 [Solidity 合约、Foundry 测试](./contracts/flap-boost/)。当前 UI 读取 BSC 测试网 Factory `0x1F063Be383faBFFCC209Cb5Cf96334D0dD55048a`。合约保留 BNB Chain 主网路径；UI manifest 目前尚未绑定主网 Factory。
+
+界面预览执行 `yarn dev -p 3001`。合约在 `contracts/flap-boost` 目录执行 `forge build` 和 `forge test --no-match-path '*.mainnet.t.sol'`；目录内附有依赖源码与许可证。范围及测试限制见[合约说明](./contracts/flap-boost/README.md)和[送审说明](./contracts/flap-boost/AUDIT_SUBMISSION.md)。
+
+---
+
 # Flap Vault UI Template
 
 `three-r3f-v1` 支持两种表面：省略 `mode` 且证明 token 全部以 `7777` 结尾的 Vault UI，以及 token-scoped `8888` Mini App。仅 8888 Mini App 在没有项目测试 token 时可以省略 `--token`，由脚手架按所选支持链使用 Flap 已部署的标准 `8888` 预览 token；该 token 只用于预览/E2E 证明，不是项目生产 CA 限制，并且仍执行正常的已部署 ERC20 校验。

@@ -2952,7 +2952,6 @@ function TaskRuleEditor({
             ? "help.triggerFeeMinimumWarning"
             : "help.triggerFeeMinimum", undefined, {
             amount: formatTokenAmount(minimumTrade, 18),
-            fee: formatTokenAmount(task.triggerFee ?? 0n, 18),
             multiplier: task.triggerFeeMultiplier?.toString() ?? "",
           })}
         </p>
@@ -3318,7 +3317,6 @@ function TaskFunding({
               <p className="mt-2 rounded-lg border border-[#695734] bg-[#19170E] px-3 py-2 text-xs leading-5 text-[#E2CEA1]">
                 {t("states.feeGuardHint", undefined, {
                   amount: formatTokenAmount(minimumTrade, 18),
-                  fee: formatTokenAmount(task.triggerFee ?? 0n, 18),
                   multiplier: task.triggerFeeMultiplier?.toString() ?? "",
                 })}
               </p>

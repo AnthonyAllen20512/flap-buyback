@@ -109,6 +109,8 @@ interface TaskSnapshot {
   startFeeCharged: boolean;
   startFeeOwed: bigint;
   startFee: bigint;
+  triggerFee: bigint | null;
+  triggerFeeMultiplier: bigint | null;
   pendingRuleUpdate: TaskRuleUpdate | null;
   callbackInProgress: boolean;
   consecutiveFailures: number;
@@ -179,6 +181,11 @@ function taskTotalBNB(task: TaskSnapshot) {
   return task.availableBNB + task.reservedBNB + task.startFeeOwed;
 }
 
+function triggerTradeMinimum(task: TaskSnapshot): bigint | null {
+  if (task.triggerFee === null || task.triggerFeeMultiplier === null || task.triggerFee === 0n) return null;
+  return task.triggerFee * task.triggerFeeMultiplier;
+}
+
 function canStartTask(task: TaskSnapshot) {
   if (!task.active || task.paused || task.started || task.callbackInProgress || task.pendingTokens > 0n) return false;
   const fee = task.startFeeCharged ? 0n : task.startFee;
@@ -198,8 +205,13 @@ function taskStatusKey(task: TaskSnapshot) {
   if (task.triggerFailed) return "states.triggerFailed";
   if (task.triggerId) return task.consecutiveFailures ? "states.retryScheduled" : "states.scheduled";
   if (task.vaultTriggerId || task.pendingTokens > 0n) return "states.queued";
+  const minimumTrade = triggerTradeMinimum(task);
+  if (task.buyMode === 0 && minimumTrade !== null && task.fixedBNBPerRound < minimumTrade)
+    return "states.feeGuard";
   if (task.availableBNB === 0n || (task.buyMode === 0 && task.availableBNB < task.fixedBNBPerRound))
     return "states.needsFunding";
+  if (task.buyMode === 0 && task.triggerFee !== null &&
+      task.availableBNB < task.fixedBNBPerRound + task.triggerFee) return "states.needsFunding";
   return task.consecutiveFailures ? "states.retryNeeded" : "states.awaitingSchedule";
 }
 
@@ -703,13 +715,23 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
       return;
     }
     try {
-      const allVaultAddresses = await sdk.readContract<Address[]>({
-        contract: "boostFactory",
-        address: factoryAddress,
-        abi: factoryAbi,
-        functionName: "vaultsOf",
-        args: [context.userAddress],
-      });
+      const [triggerFee, allVaultAddresses] = await Promise.all([
+        triggerAddress
+          ? sdk.readContract<bigint>({
+              contract: "boostTrigger",
+              address: triggerAddress,
+              abi: triggerAbi,
+              functionName: "getFee",
+            }).catch(() => null)
+          : Promise.resolve(null),
+        sdk.readContract<Address[]>({
+          contract: "boostFactory",
+          address: factoryAddress,
+          abi: factoryAbi,
+          functionName: "vaultsOf",
+          args: [context.userAddress],
+        }),
+      ]);
       const vaultRows = await mapInBatches([...allVaultAddresses].reverse(), VAULT_READ_BATCH_SIZE, async (address) => {
         const [
           owner,
@@ -718,6 +740,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           startFeeCharged,
           startFeeOwed,
           startFee,
+          triggerFeeMultiplier,
           callbackInProgress,
           triggerId,
           scheduledId,
@@ -737,6 +760,12 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           }),
           sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "startFeeOwed" }),
           sdk.readContract<bigint>({ contract: "boostVault", address, abi: vaultAbi, functionName: "START_FEE" }),
+          sdk.readContract<bigint>({
+            contract: "boostVault",
+            address,
+            abi: vaultAbi,
+            functionName: "MIN_TRIGGER_TRADE_FEE_MULTIPLIER",
+          }).catch(() => null),
           sdk.readContract<boolean>({
             contract: "boostVault",
             address,
@@ -790,6 +819,7 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           startFeeCharged,
           startFeeOwed,
           startFee,
+          triggerFeeMultiplier,
           callbackInProgress,
           triggerId,
           triggerFailed,
@@ -849,6 +879,8 @@ export default function FlapBoostMiniApp(_props: VaultComponentProps) {
           startFeeCharged: vault.startFeeCharged,
           startFeeOwed: vault.startFeeOwed,
           startFee: vault.startFee,
+          triggerFee,
+          triggerFeeMultiplier: vault.triggerFeeMultiplier,
           pendingRuleUpdate,
           callbackInProgress: vault.callbackInProgress,
           consecutiveFailures: operation.consecutiveFailures,
@@ -2792,6 +2824,10 @@ function TaskRuleEditor({
   const [recipientsText, setRecipientsText] = useState(rules.recipients.join("\n"));
   const [randomRecipientCount, setRandomRecipientCount] = useState(String(rules.randomRecipientCount || 5));
   const [formError, setFormError] = useState<string | null>(null);
+  const minimumTrade = triggerTradeMinimum(task);
+  const enteredFixedBnb = mode === "fixed-bnb" && validBnbAmount(fixedBnb)
+    ? parseTokenAmount(fixedBnb.trim(), 18)
+    : null;
 
   function submitRules() {
     try {
@@ -2905,6 +2941,21 @@ function TaskRuleEditor({
           />
         </CompactField>
       </div>
+      {mode === "fixed-bnb" && minimumTrade !== null ? (
+        <p className={
+          "mt-3 rounded-lg border px-3 py-2 text-xs leading-5 " +
+          (enteredFixedBnb !== null && enteredFixedBnb < minimumTrade
+            ? "border-[#695734] bg-[#19170E] text-[#E2CEA1]"
+            : "border-[#29474D] bg-[#0D1B20] text-[#A9C7C6]")
+        }>
+          {t(enteredFixedBnb !== null && enteredFixedBnb < minimumTrade
+            ? "help.triggerFeeMinimumWarning"
+            : "help.triggerFeeMinimum", undefined, {
+            amount: formatTokenAmount(minimumTrade, 18),
+            fee: formatTokenAmount(task.triggerFee ?? 0n, 18),
+          })}
+        </p>
+      ) : null}
       <div className="mt-4 border-t border-[#424746] pt-4">
         <p className="text-sm font-medium text-[#F1EAD9]">{t("labels.output")}</p>
         <p className="mt-1 text-xs leading-5 text-[#D5C585]">{t("help.editOutputRisk")}</p>
@@ -3067,6 +3118,7 @@ function TaskFunding({
   const [fundsTab, setFundsTab] = useState<"fund" | "withdraw">(hasActiveOperations ? "fund" : "withdraw");
   const [confirmClose, setConfirmClose] = useState(false);
   const status = t(taskStatusKey(task));
+  const minimumTrade = triggerTradeMinimum(task);
   const tab = !hasActiveOperations && isOwner ? "withdraw" : fundsTab;
   const startWithFunding = tab === "fund" && isOwner && task.active && !task.paused && !task.started;
   return (
@@ -3261,15 +3313,28 @@ function TaskFunding({
           )
         ) : task.pendingTokens === 0n ? (
           <>
-            <p className="mt-2 text-xs leading-5 text-[#A4AAA8]">{t("states.readyToSchedule")}</p>
-            <TxButton
-              className={GOLD_SECONDARY_BUTTON + " mt-3 h-10 w-full rounded-lg px-3 text-xs"}
-              idleLabel={t("buttons.checkFunds")}
-              state={buttonState("poke:" + task.address)}
-              onClick={onCheck}
-              disabled={!canWrite || task.callbackInProgress}
-              variant="secondary"
-            />
+            {taskStatusKey(task) === "states.feeGuard" && minimumTrade !== null ? (
+              <p className="mt-2 rounded-lg border border-[#695734] bg-[#19170E] px-3 py-2 text-xs leading-5 text-[#E2CEA1]">
+                {t("states.feeGuardHint", undefined, {
+                  amount: formatTokenAmount(minimumTrade, 18),
+                  fee: formatTokenAmount(task.triggerFee ?? 0n, 18),
+                })}
+              </p>
+            ) : taskStatusKey(task) === "states.needsFunding" ? (
+              <p className="mt-2 text-xs leading-5 text-[#A4AAA8]">{t("states.needsFundingHint")}</p>
+            ) : (
+              <>
+                <p className="mt-2 text-xs leading-5 text-[#A4AAA8]">{t("states.readyToSchedule")}</p>
+                <TxButton
+                  className={GOLD_SECONDARY_BUTTON + " mt-3 h-10 w-full rounded-lg px-3 text-xs"}
+                  idleLabel={t("buttons.checkFunds")}
+                  state={buttonState("poke:" + task.address)}
+                  onClick={onCheck}
+                  disabled={!canWrite || task.callbackInProgress}
+                  variant="secondary"
+                />
+              </>
+            )}
           </>
         ) : null}
         {task.consecutiveFailures > 0 ? (

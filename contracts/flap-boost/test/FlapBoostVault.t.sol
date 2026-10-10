@@ -217,6 +217,31 @@ contract FlapBoostVaultTest is Test {
         assertEq(triggerService.lastId(), 0);
     }
 
+    function testEditingRuleAutomaticallyBooksWhenFeeGuardClears() public {
+        (FlapBoostVault vault,) = _create(0.001 ether, 60);
+        vm.prank(OWNER);
+        vault.fundAndTryStart{value: 0.02 ether}(0);
+        assertEq(vault.triggerId(), 0);
+
+        FlapBoostVault.RuleUpdate memory update = FlapBoostVault.RuleUpdate({
+            fixedBNBPerRound: 0.004 ether,
+            fixedTokenAmountPerRound: 0,
+            balanceBps: 0,
+            maxBNBPerRound: 0,
+            interval: 60,
+            outputMode: 0,
+            randomRecipientCount: 0,
+            retainRecipient: address(0),
+            recipients: new address[](0)
+        });
+        vm.prank(OWNER);
+        vault.updateOperation(0, update);
+
+        assertEq(vault.triggerId(), 1);
+        assertEq(vault.reservedBNB(), 0.004 ether);
+        assertEq(triggerService.afterTime(1), vault.getOperation(0).nextEligibleAt);
+    }
+
     function testOnlyOwnerCanRecoverProvablyFailedTrigger() public {
         (FlapBoostVault vault,) = _create(0.01 ether, 60);
         vm.prank(OWNER);

@@ -15,6 +15,7 @@ export const portalAbi = parseAbi([
 ]);
 
 export const triggerAbi = parseAbi([
+  "function getFee() view returns (uint256)",
   "function getRequest(uint256 requestId) view returns ((address requester, uint64 executeAfter, uint8 status, uint128 feePaid))",
 ]);
 
@@ -26,6 +27,7 @@ export const vaultAbi = parseAbi([
   "function startFeeCharged() view returns (bool)",
   "function startFeeOwed() view returns (uint256)",
   "function START_FEE() view returns (uint256)",
+  "function MIN_TRIGGER_TRADE_FEE_MULTIPLIER() view returns (uint256)",
   "function hasPendingRules(uint256 id) view returns (bool)",
   "function pendingRules(uint256 id) view returns ((uint256 fixedBNBPerRound, uint256 fixedTokenAmountPerRound, uint16 balanceBps, uint256 maxBNBPerRound, uint64 interval, uint8 outputMode, uint8 randomRecipientCount, address retainRecipient, address[] recipients))",
   "function callbackInProgress() view returns (bool)",
